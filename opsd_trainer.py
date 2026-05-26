@@ -1498,8 +1498,10 @@ class OPSDTrainer(SFTTrainer):
         # Restricts which completion positions contribute to the JSD loss based on
         # paragraph/sentence structure detected in the decoded completion text.
         if self.token_selection_mode != "baseline":
+            # Use per-example actual_prompt_len (not the padded batch-level student_prompt_len)
+            # so the completion slice aligns with how labels were masked above.
             completion_ids_list = [
-                generated_ids[i, student_prompt_len:].tolist()
+                generated_ids[i, inputs["student_prompt_lengths_per_example"][i].item():].tolist()
                 for i in range(generated_ids.shape[0])
             ]
             sel_masks = self._compute_token_selection_mask(completion_ids_list, completion_texts)
