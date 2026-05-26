@@ -106,6 +106,25 @@ class CustomScriptArguments(ScriptArguments):
             "Default True. Set to False for the matched non-thinking ablation (both nonthink)."
         },
     )
+    token_selection_mode: str = field(
+        default="baseline",
+        metadata={
+            "help": "Controls which token positions contribute to the JSD loss. "
+            "Options: "
+            "'baseline' — all positions (default OPSD behavior); "
+            "'first_sentence' — only tokens in the first sentence of each \\n\\n-paragraph; "
+            "'middle_sentences' — only tokens in middle sentences of each paragraph; "
+            "'last_sentence' — only tokens in the last sentence of each paragraph; "
+            "'paragraph_first_token' — only the very first token of each \\n\\n-separated block."
+        },
+    )
+    token_selection_top_k: int = field(
+        default=1,
+        metadata={
+            "help": "Vocab-axis top-k used at the selected token positions for non-baseline modes. "
+            "Typical values: 1 or 2. Ignored when token_selection_mode='baseline'."
+        },
+    )
 
 
 if __name__ == "__main__":
@@ -282,6 +301,8 @@ if __name__ == "__main__":
         ema_decay=script_args.ema_decay,
         student_thinking=script_args.student_thinking,
         teacher_thinking=script_args.teacher_thinking,
+        token_selection_mode=script_args.token_selection_mode,
+        token_selection_top_k=script_args.token_selection_top_k,
     )
 
     if training_args.eval_strategy != "no":

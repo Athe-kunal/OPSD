@@ -144,6 +144,8 @@ class OPSDTrainer(SFTTrainer):
         ema_decay: float = 0.999,
         student_thinking: bool = False,
         teacher_thinking: bool = True,
+        token_selection_mode: str = "baseline",
+        token_selection_top_k: int = 1,
     ):
         self.model_name_or_path = model if isinstance(model, str) else model.config._name_or_path
         self.model_revision = getattr(args, "student_model_revision", None)
@@ -186,7 +188,10 @@ class OPSDTrainer(SFTTrainer):
         self.use_thinking_machines_loss = use_thinking_machines_loss
         self.fixed_teacher = fixed_teacher
         self.reason_first = reason_first
-        self.top_k_loss = top_k_loss
+        self.token_selection_mode = token_selection_mode
+        self.token_selection_top_k = token_selection_top_k
+        # For non-baseline modes the vocab-axis k is token_selection_top_k; baseline uses top_k_loss as-is.
+        self.top_k_loss = top_k_loss if token_selection_mode == "baseline" else token_selection_top_k
         self.jsd_token_clip = jsd_token_clip
         self.use_ema_teacher = use_ema_teacher
         self.ema_decay = ema_decay
@@ -622,6 +627,77 @@ class OPSDTrainer(SFTTrainer):
                 for name, param in unwrapped.named_parameters():
                     if name in saved:
                         param.data = saved[name]
+
+    def _compute_token_selection_mask(self, completion_ids_list: list, completion_texts: list) -> list:
+        """Build a per-example boolean mask over completion token positions.
+
+        For non-baseline token_selection_mode, selected positions will contribute to the JSD
+        loss; all other positions will be masked out via labels=-100.
+
+        Paragraph boundaries are defined by '\\n\\n'.  Sentence boundaries within a paragraph
+        are detected with nltk.sent_tokenize.  Token counts per paragraph/sentence are
+        estimated by re-tokenising each piece independently — this is an approximation but is
+        fast and correct enough in practice.
+
+        Returns:
+            List of bool tensors, one per example, shape (completion_length,).
+        """
+        import nltk
+
+        tokenize = self.processing_class
+        mode = self.token_selection_mode
+        masks = []
+
+        for comp_ids, comp_text in zip(completion_ids_list, completion_texts):
+            n_tokens = len(comp_ids)
+            mask = torch.zeros(n_tokens, dtype=torch.bool)
+
+            # Split completion into paragraphs; keep the separator so token counts stay aligned.
+            # We reconstruct token positions by re-encoding each paragraph piece.
+            raw_paragraphs = comp_text.split("\n\n")
+            token_pos = 0
+
+            for para_idx, para in enumerate(raw_paragraphs):
+                # Re-add the '\n\n' separator for all but the last paragraph so that the
+                # cumulative token count stays aligned with the actual completion encoding.
+                para_with_sep = para if para_idx == len(raw_paragraphs) - 1 else para + "\n\n"
+                para_ids = tokenize.encode(para_with_sep, add_special_tokens=False)
+                para_len = len(para_ids)
+
+                if mode == "paragraph_first_token":
+                    # Select only the very first token of this paragraph block.
+                    if token_pos < n_tokens:
+                        mask[token_pos] = True
+                else:
+                    sentences = nltk.sent_tokenize(para) if para.strip() else []
+                    n_sents = len(sentences)
+                    sent_token_pos = token_pos
+
+                    for sent_idx, sent in enumerate(sentences):
+                        sent_ids = tokenize.encode(sent, add_special_tokens=False)
+                        sent_len = len(sent_ids)
+
+                        is_first = sent_idx == 0
+                        is_last = sent_idx == n_sents - 1
+                        is_middle = not is_first and not is_last
+
+                        selected = (
+                            (mode == "first_sentence" and is_first)
+                            or (mode == "last_sentence" and is_last)
+                            or (mode == "middle_sentences" and is_middle)
+                        )
+
+                        if selected:
+                            end = min(sent_token_pos + sent_len, n_tokens)
+                            mask[sent_token_pos:end] = True
+
+                        sent_token_pos += sent_len
+
+                token_pos = min(token_pos + para_len, n_tokens)
+
+            masks.append(mask)
+
+        return masks
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -1417,6 +1493,23 @@ class OPSDTrainer(SFTTrainer):
             labels[labels == self.processing_class.pad_token_id] = -100
 
         inputs["labels"] = labels
+
+        # === TOKEN SELECTION MASKING (non-baseline modes) ===
+        # Restricts which completion positions contribute to the JSD loss based on
+        # paragraph/sentence structure detected in the decoded completion text.
+        if self.token_selection_mode != "baseline":
+            completion_ids_list = [
+                generated_ids[i, student_prompt_len:].tolist()
+                for i in range(generated_ids.shape[0])
+            ]
+            sel_masks = self._compute_token_selection_mask(completion_ids_list, completion_texts)
+            for i, sel_mask in enumerate(sel_masks):
+                actual_prompt_len = inputs["student_prompt_lengths_per_example"][i].item()
+                comp_start = actual_prompt_len  # position in the full labels row
+                comp_end = comp_start + len(sel_mask)
+                # Deselected positions: mask them out so they don't contribute to the loss.
+                deselected = ~sel_mask.to(labels.device)
+                inputs["labels"][i, comp_start:comp_end][deselected] = -100
 
         # Log prompt and completion texts
         self._textual_logs["prompt"].extend(gather_object(prompt_texts))

@@ -11,7 +11,7 @@ CUDA_VISIBLE_DEVICES=2,3 accelerate launch \
     --gradient_checkpointing \
     --gradient_accumulation_steps 2 \
     --output_dir  /data0/siyanz/opsd/ \
-    --run_config qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005 \
+    --run_config qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_firstsent_topk1 \
     --num_train_epochs 30 \
     --max_completion_length 1024 \
     --save_steps 25 \
@@ -34,4 +34,6 @@ CUDA_VISIBLE_DEVICES=2,3 accelerate launch \
     --lmbda 1 \
     --fixed_teacher \
     --jsd_token_clip 0.05 \
+    --token_selection_mode first_sentence \
+    --token_selection_top_k 1 \
     --wandb_project OPSD
