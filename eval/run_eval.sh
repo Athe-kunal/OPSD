@@ -1,7 +1,7 @@
 #!/bin/bash
 
-BASE_MODEL="/data0/shared/Qwen3-1.7B"
-EXP_DIR="/data1/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005"
+BASE_MODEL="data0/shared/Qwen3-1.7B"
+EXP_DIR="data1/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005"
 
 # evaluate base model performance
 NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 python evaluate_math.py \

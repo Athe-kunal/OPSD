@@ -5,3 +5,8 @@ __pycache__/
 opsd.egg-info/
 
 .mypy_cache/
+
+wandb/
+logs/
+
+data0/

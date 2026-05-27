@@ -1,20 +1,25 @@
+PER_DEVICE_BATCH=${1:-8}
+GRAD_ACCUM=${2:-2}
+MAX_STEPS=${3:-500}
+SAVE_STEPS=${4:-25}
+
 CUDA_VISIBLE_DEVICES=2,3 accelerate launch \
     --config_file accelerate.yaml \
     --num_processes 2 \
-    --gradient_accumulation_steps 2 \
     --main_process_port 12949 \
     opsd_train.py \
     --model_name_or_path Qwen/Qwen3-1.7B \
     --learning_rate 5e-6 \
     --max_grad_norm 0.1 \
-    --per_device_train_batch_size 4 \
+    --per_device_train_batch_size "$PER_DEVICE_BATCH" \
     --gradient_checkpointing \
-    --gradient_accumulation_steps 2 \
-    --output_dir  /data0/siyanz/opsd/ \
+    --gradient_accumulation_steps "$GRAD_ACCUM" \
+    --max_steps "$MAX_STEPS" \
+    --output_dir  data0/siyanz/opsd/ \
     --run_config qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_middlesent_topk1 \
     --num_train_epochs 30 \
     --max_completion_length 1024 \
-    --save_steps 25 \
+    --save_steps "$SAVE_STEPS" \
     --logging_steps 2 \
     --attn_implementation flash_attention_2 \
     --torch_dtype bfloat16 \

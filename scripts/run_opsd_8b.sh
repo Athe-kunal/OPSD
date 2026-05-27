@@ -4,13 +4,13 @@ accelerate launch \
     --gradient_accumulation_steps 2 \
     --main_process_port 12949 \
     opsd_train.py \
-    --model_name_or_path /data0/shared/Qwen3-8B \
+    --model_name_or_path data0/shared/Qwen3-8B \
     --learning_rate 5e-6 \
     --max_grad_norm 0.1 \
     --per_device_train_batch_size 2 \
     --gradient_checkpointing \
     --gradient_accumulation_steps 2 \
-    --output_dir  /data0/siyanz/opsd/ \
+    --output_dir  data0/siyanz/opsd/ \
     --run_config qwen38b_gen1024_fixteacher_temp11_forwardbeta0_clip006 \
     --num_train_epochs 30 \
     --max_completion_length 1024 \

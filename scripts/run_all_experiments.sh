@@ -6,13 +6,18 @@
 
 set -euo pipefail
 
+PER_DEVICE_BATCH=${1:-8}
+GRAD_ACCUM=${2:-2}
+MAX_STEPS=${3:-250}
+SAVE_STEPS=${4:-250}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$REPO_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 EXPERIMENTS=(
-    "run_opsd_1b.sh"
+    # "run_opsd_1b.sh"
     "run_opsd_1b_first_sentence.sh"
     "run_opsd_1b_middle_sentences.sh"
     "run_opsd_1b_last_sentence.sh"
@@ -24,6 +29,7 @@ FAILED=()
 
 echo "========================================"
 echo " OPSD experiment suite — $TOTAL runs"
+echo " per_device_batch=$PER_DEVICE_BATCH  grad_accum=$GRAD_ACCUM  max_steps=$MAX_STEPS  save_steps=$SAVE_STEPS"
 echo " Logs: $LOG_DIR"
 echo " Start: $(date)"
 echo "========================================"
@@ -41,7 +47,7 @@ for i in "${!EXPERIMENTS[@]}"; do
     echo "----------------------------------------"
 
     # Run from repo root so relative paths (accelerate.yaml, opsd_train.py) resolve correctly.
-    if bash "$SCRIPT_DIR/$SCRIPT" 2>&1 | tee "$LOG_FILE"; then
+    if bash "$SCRIPT_DIR/$SCRIPT" "$PER_DEVICE_BATCH" "$GRAD_ACCUM" "$MAX_STEPS" "$SAVE_STEPS" 2>&1 | tee "$LOG_FILE"; then
         echo "[$RUN_NUM/$TOTAL] DONE: $SCRIPT  ($(date))"
     else
         echo "[$RUN_NUM/$TOTAL] FAILED: $SCRIPT  ($(date))"
