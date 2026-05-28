@@ -5,11 +5,12 @@ CHECKPOINT_DIR="/home/recoverx/astarag/OPSD/data0/siyanz/opsd/qwen31b_gen1024_fi
 STEP=250
 EXP_NAME=$(basename "$(dirname "$CHECKPOINT_DIR")")
 
-NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=2,3 python eval/eval_math.py \
+NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=1 python eval/eval_math.py \
     --base_model "$BASE_MODEL" \
     --checkpoint_dir "$CHECKPOINT_DIR" \
-    --val_n 12 \
+    --val_n 8 \
     --temperature 1.0 \
-    --tensor_parallel_size 2 \
+    --smoke_test \
+    --tensor_parallel_size 1 \
     --wandb_project "OPSD-eval" \
     --wandb_run_name "opsd-eval-${STEP}-${EXP_NAME}-thinking"

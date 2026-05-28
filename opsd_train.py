@@ -1,8 +1,10 @@
 import os
+import subprocess
 import wandb
 
+from pathlib import Path
 from datasets import load_dataset
-from transformers import AutoTokenizer, GenerationConfig
+from transformers import AutoTokenizer, GenerationConfig, TrainerCallback
 
 from trl import (
     LogCompletionsCallback,
@@ -16,6 +18,58 @@ from trl import (
 from trl.experimental.gold import GOLDConfig
 from opsd_trainer import OPSDTrainer
 from dataclasses import dataclass, field
+
+
+class AsyncEvalCallback(TrainerCallback):
+    """After each checkpoint save, launch eval on a separate GPU.
+    Waits for the previous eval to complete before launching a new one,
+    so at most one eval is running at any time."""
+
+    def __init__(self, base_model: str, eval_gpu: str = "1"):
+        self.base_model = base_model
+        self.eval_gpu = eval_gpu
+        self._eval_proc = None
+
+    def _wait_for_eval(self):
+        if self._eval_proc is not None and self._eval_proc.poll() is None:
+            print(f"\n[EvalCallback] Waiting for previous eval to complete before launching next...")
+            self._eval_proc.wait()
+            print(f"[EvalCallback] Previous eval done (exit code {self._eval_proc.returncode}).")
+
+    def on_save(self, args, state, control, **kwargs):
+        if not state.is_world_process_zero:
+            return
+
+        step = state.global_step
+        checkpoint_dir = str(Path(args.output_dir) / f"checkpoint-{step}")
+        exp_name = Path(args.output_dir).name
+        wandb_run_name = f"opsd-eval-{step}-{exp_name}-thinking"
+
+        self._wait_for_eval()
+
+        cmd = [
+            "python", "eval/eval_math.py",
+            "--base_model", self.base_model,
+            "--checkpoint_dir", checkpoint_dir,
+            "--val_n", "8",
+            "--temperature", "1.0",
+            "--tensor_parallel_size", "1",
+            "--wandb_project", "OPSD-eval",
+            "--wandb_run_name", wandb_run_name,
+        ]
+
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = self.eval_gpu
+        env["NCCL_P2P_DISABLE"] = "1"
+
+        print(f"\n[EvalCallback] Launching eval for checkpoint-{step} on GPU {self.eval_gpu}...")
+        print(f"[EvalCallback] checkpoint_dir={checkpoint_dir}")
+        self._eval_proc = subprocess.Popen(cmd, env=env)
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if not state.is_world_process_zero:
+            return
+        self._wait_for_eval()
 
 # Enable logging in a Hugging Face Space
 os.environ.setdefault("TRACKIO_SPACE_ID", "trl-trackio")
@@ -150,8 +204,6 @@ if __name__ == "__main__":
         full_wandb_run_config = f"{script_args.run_config}_lr{lr_str}_bs{effective_batch_size}"
         # Append run_config to output_dir if it doesn't already end with it
         if not training_args.output_dir.endswith(script_args.run_config):
-            from pathlib import Path
-
             training_args.output_dir = str(Path(training_args.output_dir) / script_args.run_config)
     else:
         # Extract model name from path (e.g., "Qwen3-1.7B" from "/home/siyanzhao/models/Qwen3-1.7B")
@@ -282,6 +334,9 @@ if __name__ == "__main__":
     # Add presence_penalty to training_args so it can be accessed in the trainer
     training_args.presence_penalty = script_args.presence_penalty
 
+    # Only save model weights + tokenizer; skip optimizer/scheduler states to save disk space.
+    training_args.save_only_model = True
+
     dataset = load_dataset("siyanzhao/Openthoughts_math_30k_opsd")
     train_dataset = dataset["train"]
 
@@ -305,6 +360,11 @@ if __name__ == "__main__":
         token_selection_top_k=script_args.token_selection_top_k,
     )
 
+    # trainer.add_callback(AsyncEvalCallback(
+    #     base_model=model_args.model_name_or_path,
+    #     eval_gpu="1",
+    # ))
+
     if training_args.eval_strategy != "no":
         generation_config = GenerationConfig(
             max_new_tokens=training_args.max_completion_length,
@@ -316,4 +376,4 @@ if __name__ == "__main__":
 
     trainer.train()
 
-    trainer.save_model(training_args.output_dir)
+    # trainer.save_model(training_args.output_dir)

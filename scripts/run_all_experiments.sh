@@ -9,10 +9,10 @@ set -euo pipefail
 
 PER_DEVICE_BATCH=${1:-4}
 GRAD_ACCUM=${2:-4}
-MAX_STEPS=${3:-250}
-SAVE_STEPS=${4:-250}
-TRAIN_GPU=${5:-0}
-ROLLOUT_GPU=${6:-1}
+MAX_STEPS=${3:-100}
+SAVE_STEPS=${4:-25}
+TRAIN_GPU=${5:-2}
+ROLLOUT_GPU=${6:-3}
 export TRAIN_GPU ROLLOUT_GPU
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,13 +21,13 @@ LOG_DIR="$REPO_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 EXPERIMENTS=(
-    # "run_opsd_1b.sh"
-    # "run_opsd_1b_first_sentence.sh"
-    # "run_opsd_1b_middle_sentences.sh"
-    # "run_opsd_1b_last_sentence.sh"
+    "run_opsd_1b.sh"
+    "run_opsd_1b_first_sentence.sh"
+    "run_opsd_1b_middle_sentences.sh"
+    "run_opsd_1b_last_sentence.sh"
     "run_opsd_1b_paragraph_first_token.sh"
     "run_opsd_1b_first_sentence_topk2.sh"
-    "run_opsd_1b_middle_sentences_topk2.sh"
+    # "run_opsd_1b_middle_sentences_topk2.sh"
     "run_opsd_1b_last_sentence_topk2.sh"
 )
 

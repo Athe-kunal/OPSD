@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import json
 from collections import Counter
 from pathlib import Path
@@ -116,7 +117,6 @@ def load_vllm_model(
             llm_config["max_cpu_loras"] = 1
         else:
             print(f"Warning: No LoRA weights found at {lora_adapter_path}. Using base model only.")
-            lora_adapter_path = None
 
     llm = LLM(**llm_config)
     tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
@@ -128,50 +128,26 @@ def load_vllm_model(
     return llm, tokenizer
 
 
-def evaluate_dataset(
+async def prepare_dataset(
     dataset_name: str,
-    llm,
     tokenizer,
-    max_new_tokens: int,
-    temperature: float = 1.0,
-    top_p: float = 0.95,
-    top_k: int = -1,
-    min_p: float = 0.0,
-    presence_penalty: float = 0.0,
     num_samples: int = None,
-    output_file: str = None,
-    lora_request=None,
-    base_model_name: str = None,
     enable_thinking: bool = True,
-    val_n: int = 6,
-):
+) -> dict:
+    """Load dataset and build prompts (I/O-bound, runs concurrently via asyncio.gather)."""
     cfg = DATASETS[dataset_name]
-    print(f"\n{'='*70}")
-    print(f"EVALUATING: {dataset_name.upper()}")
-    print(f"Dataset: {cfg['hf_path']}")
-    print(f"Thinking: {'ON' if enable_thinking else 'OFF'} | Temp: {temperature} | Top-P: {top_p} | Val-N: {val_n}")
-    print(f"{'='*70}")
+    print(f"Loading {dataset_name} from {cfg['hf_path']}...")
 
-    dataset = load_dataset(cfg["hf_path"], split=cfg["split"], trust_remote_code=True)
-    print(f"Loaded {len(dataset)} problems")
+    dataset = await asyncio.to_thread(
+        load_dataset, cfg["hf_path"], split=cfg["split"], trust_remote_code=True
+    )
 
     if num_samples:
         dataset = dataset.select(range(min(num_samples, len(dataset))))
 
-    sampling_params = SamplingParams(
-        temperature=temperature,
-        top_p=top_p,
-        top_k=top_k,
-        min_p=min_p,
-        max_tokens=max_new_tokens,
-        presence_penalty=presence_penalty,
-        n=val_n,
-    )
+    print(f"  {dataset_name}: {len(dataset)} problems")
 
-    all_prompts = []
-    all_gt_answers = []
-    all_problems = []
-    all_question_ids = []
+    prompts, gt_answers, problems, question_ids = [], [], [], []
 
     for example in dataset:
         problem = example[cfg["problem_col"]]
@@ -180,23 +156,46 @@ def evaluate_dataset(
 
         user_message = f"{problem}\n\nPlease reason step by step, and put your final answer within \\boxed{{}}."
         messages = [{"role": "user", "content": user_message}]
-
         text = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True, enable_thinking=enable_thinking
         )
-        all_prompts.append(text)
-        all_gt_answers.append(gt_answer)
-        all_problems.append(problem)
-        all_question_ids.append(question_id)
+        prompts.append(text)
+        gt_answers.append(gt_answer)
+        problems.append(problem)
+        question_ids.append(question_id)
 
-    print(f"Running vLLM batch inference on {len(all_prompts)} problems...")
+    return {
+        "dataset_name": dataset_name,
+        "prompts": prompts,
+        "gt_answers": gt_answers,
+        "problems": problems,
+        "question_ids": question_ids,
+        "num_problems": len(dataset),
+    }
 
-    if lora_request is not None:
-        if lora_request.lora_path is None:
-            raise ValueError("LoRA request has no path; may be a zero3+peft issue — try zero2")
-        outputs = llm.generate(all_prompts, sampling_params, lora_request=lora_request, use_tqdm=True)
-    else:
-        outputs = llm.generate(all_prompts, sampling_params, use_tqdm=True)
+
+async def process_results(
+    dataset_info: dict,
+    outputs: list,
+    val_n: int,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    min_p: float,
+    presence_penalty: float,
+    enable_thinking: bool,
+    base_model_name: str,
+    output_file: str = None,
+) -> dict:
+    """Grade outputs and compute metrics (CPU-bound grading, runs concurrently via asyncio.gather)."""
+    dataset_name = dataset_info["dataset_name"]
+    problems = dataset_info["problems"]
+    gt_answers = dataset_info["gt_answers"]
+    question_ids = dataset_info["question_ids"]
+    num_problems = dataset_info["num_problems"]
+
+    print(f"\nProcessing results for {dataset_name}...")
 
     total = 0
     formatted_count = 0
@@ -204,18 +203,14 @@ def evaluate_dataset(
     total_correct_per_problem = 0
     results = []
 
-    print("\nProcessing results...")
     for idx, (output, problem, gt_answer, question_id) in enumerate(
-        zip(outputs, all_problems, all_gt_answers, all_question_ids)
+        zip(outputs, problems, gt_answers, question_ids)
     ):
-        generations = []
-        predicted_answers = []
-        is_correct_list = []
-        is_formatted_list = []
+        generations, predicted_answers, is_correct_list, is_formatted_list = [], [], [], []
 
         for out in output.outputs:
             predicted_answer = extract_boxed_answer(out.text)
-            is_correct = grade_answer(predicted_answer, gt_answer)
+            is_correct = await asyncio.to_thread(grade_answer, predicted_answer, gt_answer)
             is_formatted = predicted_answer is not None
 
             generations.append(out.text)
@@ -231,7 +226,7 @@ def evaluate_dataset(
         if num_formatted > 0:
             formatted_predictions = [p for p, f in zip(predicted_answers, is_formatted_list) if f]
             most_common = Counter(formatted_predictions).most_common(1)[0][0]
-            majority_vote_correct = grade_answer(most_common, gt_answer)
+            majority_vote_correct = await asyncio.to_thread(grade_answer, most_common, gt_answer)
 
         if has_correct:
             pass_at_n += 1
@@ -257,16 +252,6 @@ def evaluate_dataset(
             "formatted": is_formatted_list[0],
         })
 
-        format_rate = formatted_count / total * 100
-        current_pass_at_n = pass_at_n / (idx + 1) * 100
-        current_avg_at_n = total_correct_per_problem / total * 100
-        status = "✓" if has_correct else "✗"
-        print(
-            f"{status} [{idx+1}/{len(dataset)}] Pass@{val_n}: {current_pass_at_n:.1f}% | "
-            f"Avg@{val_n}: {current_avg_at_n:.1f}% | Formatted: {format_rate:.1f}%"
-        )
-
-    num_problems = len(dataset)
     format_rate = formatted_count / total * 100
     pass_at_n_pct = pass_at_n / num_problems * 100
     average_at_n_pct = total_correct_per_problem / total * 100
@@ -323,7 +308,7 @@ def evaluate_dataset(
     return summary
 
 
-def build_output_path(base_model: str, checkpoint_dir: str, dataset_name: str, enable_thinking: bool, temperature: float, val_n: int) -> str:
+def build_output_path(base_model, checkpoint_dir, dataset_name, enable_thinking, temperature, val_n):
     parts = ["eval_results", dataset_name, Path(base_model).name]
     if checkpoint_dir:
         cp = Path(checkpoint_dir)
@@ -334,6 +319,88 @@ def build_output_path(base_model: str, checkpoint_dir: str, dataset_name: str, e
         f"valn{val_n}",
     ]
     return str(Path("eval_results") / ("_".join(parts) + ".json"))
+
+
+async def run_evaluation(args, llm, tokenizer, lora_request):
+    # Phase 1: load all datasets concurrently
+    print(f"\n{'='*70}")
+    print("PHASE 1: Loading all datasets concurrently...")
+    print(f"{'='*70}")
+    dataset_infos = await asyncio.gather(*[
+        prepare_dataset(name, tokenizer, args.num_samples, args.enable_thinking)
+        for name in args.datasets
+    ])
+
+    # Phase 2: single batched vLLM generate call over all prompts
+    sampling_params = SamplingParams(
+        temperature=args.temperature,
+        top_p=args.top_p,
+        top_k=args.top_k,
+        min_p=args.min_p,
+        max_tokens=args.max_new_tokens,
+        presence_penalty=args.presence_penalty,
+        n=args.val_n,
+    )
+
+    all_prompts = [p for info in dataset_infos for p in info["prompts"]]
+    dataset_sizes = [len(info["prompts"]) for info in dataset_infos]
+
+    print(f"\n{'='*70}")
+    print(f"PHASE 2: Single vLLM generate call — {len(all_prompts)} total prompts")
+    print(f"  " + ", ".join(f"{info['dataset_name']}: {n}" for info, n in zip(dataset_infos, dataset_sizes)))
+    print(f"  LoRA: {lora_request is not None}")
+    print(f"{'='*70}\n")
+
+    if lora_request is not None:
+        if lora_request.lora_path is None:
+            raise ValueError("LoRA request has no path; may be a zero3+peft issue — try zero2")
+        all_outputs = await asyncio.to_thread(
+            llm.generate, all_prompts, sampling_params, lora_request=lora_request, use_tqdm=True
+        )
+    else:
+        all_outputs = await asyncio.to_thread(
+            llm.generate, all_prompts, sampling_params, use_tqdm=True
+        )
+
+    # Split outputs back per dataset
+    split_outputs = []
+    offset = 0
+    for size in dataset_sizes:
+        split_outputs.append(all_outputs[offset : offset + size])
+        offset += size
+
+    # Phase 3: process and grade results for all datasets concurrently
+    print(f"\n{'='*70}")
+    print("PHASE 3: Grading results for all datasets concurrently...")
+    print(f"{'='*70}")
+
+    output_files = [
+        build_output_path(
+            args.base_model, args.checkpoint_dir, info["dataset_name"],
+            args.enable_thinking, args.temperature, args.val_n
+        )
+        for info in dataset_infos
+    ]
+
+    summaries = await asyncio.gather(*[
+        process_results(
+            dataset_info=info,
+            outputs=outputs,
+            val_n=args.val_n,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
+            min_p=args.min_p,
+            presence_penalty=args.presence_penalty,
+            enable_thinking=args.enable_thinking,
+            base_model_name=args.base_model,
+            output_file=out_file,
+        )
+        for info, outputs, out_file in zip(dataset_infos, split_outputs, output_files)
+    ])
+
+    return {s["dataset"]: s for s in summaries}
 
 
 def main():
@@ -349,7 +416,6 @@ def main():
         nargs="+",
         default=["aime24", "aime25", "hmmt25"],
         choices=list(DATASETS.keys()),
-        help="Datasets to evaluate (default: all three)",
     )
     parser.add_argument("--max_new_tokens", type=int, default=38912)
     parser.add_argument("--enable_thinking", action="store_true", default=True)
@@ -360,7 +426,7 @@ def main():
     parser.add_argument("--min_p", type=float, default=0.0)
     parser.add_argument("--presence_penalty", type=float, default=0.0)
     parser.add_argument("--num_samples", type=int, default=None)
-    parser.add_argument("--output_dir", type=str, default="eval_results", help="Directory to save per-dataset JSON results")
+    parser.add_argument("--smoke_test", action="store_true", default=False, help="Run with 1 sample per dataset to verify the pipeline end-to-end")
     parser.add_argument("--gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument("--tensor_parallel_size", type=int, default=1)
     parser.add_argument("--max_model_len", type=int, default=None)
@@ -369,6 +435,11 @@ def main():
     parser.add_argument("--wandb_run_name", type=str, default=None)
 
     args = parser.parse_args()
+
+    if args.smoke_test:
+        args.num_samples = 1
+        args.val_n = 4
+        print("SMOKE TEST MODE: 1 sample per dataset, val_n=1")
 
     if args.checkpoint_dir is not None and not Path(args.checkpoint_dir).exists():
         print(f"ERROR: Checkpoint directory does not exist: {args.checkpoint_dir}")
@@ -382,11 +453,7 @@ def main():
         print("WARNING: greedy decoding in thinking mode may cause repetitions; Qwen3 recommends temp=0.6")
 
     if args.wandb_project:
-        wandb.init(
-            project=args.wandb_project,
-            name=args.wandb_run_name,
-            config=vars(args),
-        )
+        wandb.init(project=args.wandb_project, name=args.wandb_run_name, config=vars(args))
 
     llm, tokenizer = load_vllm_model(
         args.base_model,
@@ -415,30 +482,7 @@ def main():
         except Exception as e:
             print(f"Warning: Could not create LoRA request: {e}")
 
-    all_summaries = {}
-    for dataset_name in args.datasets:
-        output_file = build_output_path(
-            args.base_model, args.checkpoint_dir, dataset_name,
-            args.enable_thinking, args.temperature, args.val_n
-        )
-        summary = evaluate_dataset(
-            dataset_name=dataset_name,
-            llm=llm,
-            tokenizer=tokenizer,
-            max_new_tokens=args.max_new_tokens,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            top_k=args.top_k,
-            min_p=args.min_p,
-            presence_penalty=args.presence_penalty,
-            num_samples=args.num_samples,
-            output_file=output_file,
-            lora_request=lora_request,
-            base_model_name=args.base_model,
-            enable_thinking=args.enable_thinking,
-            val_n=args.val_n,
-        )
-        all_summaries[dataset_name] = summary
+    all_summaries = asyncio.run(run_evaluation(args, llm, tokenizer, lora_request))
 
     print(f"\n{'='*70}")
     print("ALL EVALUATIONS COMPLETE")
