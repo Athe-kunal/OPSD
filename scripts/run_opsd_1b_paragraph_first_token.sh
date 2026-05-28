@@ -2,9 +2,12 @@ PER_DEVICE_BATCH=${1:-8}
 GRAD_ACCUM=${2:-2}
 MAX_STEPS=${3:-500}
 SAVE_STEPS=${4:-25}
+TRAIN_GPU=${5:-${TRAIN_GPU:-2}}
+ROLLOUT_GPU=${6:-${ROLLOUT_GPU:-3}}
 
-CUDA_VISIBLE_DEVICES=2,3 accelerate launch \
+CUDA_VISIBLE_DEVICES="${TRAIN_GPU},${ROLLOUT_GPU}" accelerate launch \
     --config_file accelerate.yaml \
+    --gpu_ids "${TRAIN_GPU},${ROLLOUT_GPU}" \
     --num_processes 2 \
     --main_process_port 12949 \
     opsd_train.py \

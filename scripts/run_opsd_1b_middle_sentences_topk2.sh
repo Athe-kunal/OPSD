@@ -1,10 +1,13 @@
-PER_DEVICE_BATCH=${1:-4}
-GRAD_ACCUM=${2:-4}
+PER_DEVICE_BATCH=${1:-8}
+GRAD_ACCUM=${2:-2}
 MAX_STEPS=${3:-500}
 SAVE_STEPS=${4:-25}
+TRAIN_GPU=${5:-${TRAIN_GPU:-2}}
+ROLLOUT_GPU=${6:-${ROLLOUT_GPU:-3}}
 
-CUDA_VISIBLE_DEVICES=2,3 accelerate launch \
+CUDA_VISIBLE_DEVICES="${TRAIN_GPU},${ROLLOUT_GPU}" accelerate launch \
     --config_file accelerate.yaml \
+    --gpu_ids "${TRAIN_GPU},${ROLLOUT_GPU}" \
     --num_processes 2 \
     --main_process_port 12949 \
     opsd_train.py \
@@ -16,7 +19,7 @@ CUDA_VISIBLE_DEVICES=2,3 accelerate launch \
     --gradient_accumulation_steps "$GRAD_ACCUM" \
     --max_steps "$MAX_STEPS" \
     --output_dir  data0/siyanz/opsd/ \
-    --run_config qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_lastsent_topk1 \
+    --run_config qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_middlesent_topk2 \
     --num_train_epochs 30 \
     --max_completion_length 1024 \
     --save_steps "$SAVE_STEPS" \
@@ -39,6 +42,7 @@ CUDA_VISIBLE_DEVICES=2,3 accelerate launch \
     --lmbda 1 \
     --fixed_teacher \
     --jsd_token_clip 0.05 \
-    --token_selection_mode last_sentence \
+    --token_selection_mode middle_sentences \
     --token_selection_top_k 1 \
+    --top_k_loss 2 \
     --wandb_project OPSD

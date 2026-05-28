@@ -189,9 +189,9 @@ class OPSDTrainer(SFTTrainer):
         self.fixed_teacher = fixed_teacher
         self.reason_first = reason_first
         self.token_selection_mode = token_selection_mode
-        self.token_selection_top_k = token_selection_top_k
-        # For non-baseline modes the vocab-axis k is token_selection_top_k; baseline uses top_k_loss as-is.
-        self.top_k_loss = top_k_loss if token_selection_mode == "baseline" else token_selection_top_k
+        # Position-axis (which sentence positions) and vocab-axis (top_k_loss) are orthogonal.
+        # token_selection_mode controls position-axis via labels=-100; top_k_loss is unchanged.
+        self.top_k_loss = top_k_loss
         self.jsd_token_clip = jsd_token_clip
         self.use_ema_teacher = use_ema_teacher
         self.ema_decay = ema_decay
@@ -819,6 +819,11 @@ class OPSDTrainer(SFTTrainer):
                 token_clip=self.jsd_token_clip,
             )
             del student_logits_for_loss, teacher_logits_for_loss
+
+        # Log active token count so WandB shows how many positions contribute to the loss.
+        # For non-baseline token_selection_mode this will be much smaller than baseline.
+        active_tokens = (shifted_labels != -100).sum().item()
+        self._metrics["train"]["active_loss_tokens"].append(active_tokens)
 
         empty_cache()
 
