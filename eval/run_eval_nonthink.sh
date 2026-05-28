@@ -1,15 +1,16 @@
 #!/bin/bash
 
-BASE_MODEL="data0/shared/Qwen3-4B"
+BASE_MODEL="/home/recoverx/astarag/OPSD/data0/shared/Qwen3-4B"
+CHECKPOINT_DIR="/home/recoverx/astarag/OPSD/data0/siyanz/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005/checkpoint-250"
+STEP=250
+EXP_NAME=$(basename "$(dirname "$CHECKPOINT_DIR")")
 
-# Evaluate the both-nonthink 4B model (student & teacher both non-thinking during training)
-# at checkpoint-100 on AIME24, in non-thinking inference mode.
-NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 python evaluate_math.py \
+NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=2,3 python eval/eval_math.py \
     --base_model "$BASE_MODEL" \
-    --dataset "aime24" \
+    --checkpoint_dir "$CHECKPOINT_DIR" \
     --val_n 12 \
     --temperature 1.0 \
-    --tensor_parallel_size 4 \
+    --tensor_parallel_size 2 \
     --no_thinking \
-    --checkpoint_dir data0/siyanz/opsd/qwen34b_gen1024_both_nonthink_fixteacher_temp11_forwardbeta0_clip1e-6/checkpoint-100
-wait
+    --wandb_project "OPSD-eval" \
+    --wandb_run_name "opsd-eval-${STEP}-${EXP_NAME}-nonthinking"
