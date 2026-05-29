@@ -10,3 +10,5 @@ wandb/
 logs/
 
 data0/
+
+eval_results/

@@ -31,6 +31,7 @@ DATASETS = {
         "problem_col": "problem",
         "answer_col": "answer",
         "id_col": "problem_idx",
+        "trust_remote_code": False,
     },
 }
 
@@ -139,7 +140,8 @@ async def prepare_dataset(
     print(f"Loading {dataset_name} from {cfg['hf_path']}...")
 
     dataset = await asyncio.to_thread(
-        load_dataset, cfg["hf_path"], split=cfg["split"], trust_remote_code=True
+        load_dataset, cfg["hf_path"], split=cfg["split"],
+        trust_remote_code=cfg.get("trust_remote_code", True)
     )
 
     if num_samples:
@@ -187,6 +189,7 @@ async def process_results(
     enable_thinking: bool,
     base_model_name: str,
     output_file: str = None,
+    step: int = None,
 ) -> dict:
     """Grade outputs and compute metrics (CPU-bound grading, runs concurrently via asyncio.gather)."""
     dataset_name = dataset_info["dataset_name"]
@@ -267,12 +270,13 @@ async def process_results(
     print(f"{'='*70}")
 
     if wandb.run is not None:
-        wandb.log({
+        log_data = {
             f"{dataset_name}/pass_at_{val_n}": pass_at_n_pct,
             f"{dataset_name}/average_at_{val_n}": average_at_n_pct,
             f"{dataset_name}/majority_vote_at_{val_n}": majority_vote_at_n_pct,
             f"{dataset_name}/format_rate": format_rate,
-        })
+        }
+        wandb.log(log_data, step=step)
 
     summary = {
         "base_model": base_model_name,
@@ -321,7 +325,7 @@ def build_output_path(base_model, checkpoint_dir, dataset_name, enable_thinking,
     return str(Path("eval_results") / ("_".join(parts) + ".json"))
 
 
-async def run_evaluation(args, llm, tokenizer, lora_request):
+async def run_evaluation(args, llm, tokenizer, lora_request, step: int = None):
     # Phase 1: load all datasets concurrently
     print(f"\n{'='*70}")
     print("PHASE 1: Loading all datasets concurrently...")
@@ -396,6 +400,7 @@ async def run_evaluation(args, llm, tokenizer, lora_request):
             enable_thinking=args.enable_thinking,
             base_model_name=args.base_model,
             output_file=out_file,
+            step=step,
         )
         for info, outputs, out_file in zip(dataset_infos, split_outputs, output_files)
     ])
@@ -433,6 +438,7 @@ def main():
     parser.add_argument("--val_n", type=int, default=6)
     parser.add_argument("--wandb_project", type=str, default=None)
     parser.add_argument("--wandb_run_name", type=str, default=None)
+    parser.add_argument("--step", type=int, default=None, help="Training step for x-axis in W&B plots")
 
     args = parser.parse_args()
 
@@ -482,7 +488,7 @@ def main():
         except Exception as e:
             print(f"Warning: Could not create LoRA request: {e}")
 
-    all_summaries = asyncio.run(run_evaluation(args, llm, tokenizer, lora_request))
+    all_summaries = asyncio.run(run_evaluation(args, llm, tokenizer, lora_request, step=args.step))
 
     print(f"\n{'='*70}")
     print("ALL EVALUATIONS COMPLETE")
