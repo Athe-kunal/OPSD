@@ -1,24 +1,36 @@
 #!/bin/bash
 
-BASE_MODEL="/data0/shared/Qwen3-1.7B"
-EXP_DIR="/data1/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005"
+BASE_MODEL="Qwen/Qwen3-1.7B"
+CHECKPOINT_DIR="data0/siyanz/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_lastsent_topk1/checkpoint-100"
+STEP=100
+GPU=1
+THINKING="thinking"
+EXP_NAME=$(basename "$(dirname "$CHECKPOINT_DIR")")
+LOG_DIR="logs/${EXP_NAME}"
+mkdir -p "$LOG_DIR"
 
-# evaluate base model performance
-NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 python evaluate_math.py \
+THINKING_FLAG=""
+THINKING_LABEL="thinking"
+if [ "$THINKING" = "nonthinking" ]; then
+    THINKING_FLAG="--no_thinking"
+    THINKING_LABEL="nonthinking"
+fi
+
+RUN_NAME="opsd-eval-step${STEP}-${EXP_NAME}-${THINKING_LABEL}"
+LOG_FILE="${LOG_DIR}/step${STEP}-${THINKING_LABEL}.log"
+
+echo "[$(date '+%H:%M:%S')] Starting step=${STEP} (${THINKING_LABEL}) on GPU ${GPU} → ${LOG_FILE}"
+
+NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=${GPU} python eval/eval_math.py \
     --base_model "$BASE_MODEL" \
-    --dataset "aime24" \
-    --val_n 12 \
+    --checkpoint_dir "$CHECKPOINT_DIR" \
+    --val_n 8 \
     --temperature 1.0 \
-    --tensor_parallel_size 4
-wait 
+    --tensor_parallel_size 1 \
+    --step "$STEP" \
+    $THINKING_FLAG \
+    --wandb_project "OPSD-eval" \
+    --wandb_run_name "$RUN_NAME" \
+    > "$LOG_FILE" 2>&1
 
-# after trained, evaluate the performance of the trained model. 
-for step in 25 50 75 100; do
-    NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 python evaluate_math.py \
-        --base_model "$BASE_MODEL" \
-        --dataset "aime24" \
-        --val_n 12 \
-        --temperature 1.0 \
-        --tensor_parallel_size 4 \
-        --checkpoint_dir "$EXP_DIR/checkpoint-$step"
-done
+echo "[$(date '+%H:%M:%S')] Done step=${STEP} (${THINKING_LABEL}) on GPU ${GPU}"

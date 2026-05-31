@@ -1,3 +1,14 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
+opsd.egg-info/
+
+.mypy_cache/
+
+wandb/
+logs/
+
+data0/
+
+eval_results/
