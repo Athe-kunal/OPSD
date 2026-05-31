@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026/Homebrew) (preloaded format=pdflatex 2026.3.4)  31 MAY 2026 01:40
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026/Homebrew) (preloaded format=pdflatex 2026.3.4)  31 MAY 2026 01:53
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -649,11 +649,11 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: 63DC668A706C40EE5BE25EE3BB5F0635;1070.
  ) 
 Here is how much of TeX's memory you used:
- 12816 strings out of 467525
- 204084 string characters out of 5408440
- 654614 words of memory out of 5000000
+ 12810 strings out of 467525
+ 204033 string characters out of 5408440
+ 654615 words of memory out of 5000000
  41320 multiletter control sequences out of 15000+600000
- 680587 words of font info for 194 fonts, out of 8000000 for 9000
+ 680232 words of font info for 190 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,13n,79p,1001b,464s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/am
@@ -670,7 +670,7 @@ brew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/urw/times/utmb8a.pfb>
 </opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/urw/times/u
 tmr8a.pfb></opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/u
 rw/times/utmri8a.pfb>
-Output written on main.pdf (5 pages, 906671 bytes).
+Output written on main.pdf (5 pages, 906660 bytes).
 PDF statistics:
  186 PDF objects out of 1000 (max. 8388607)
  149 compressed objects within 2 object streams
