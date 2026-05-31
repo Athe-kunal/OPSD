@@ -204,10 +204,6 @@ INPUT /opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/tfm/adobe/tim
 INPUT /opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/vf/adobe/times/ptmr8c.vf
 INPUT /opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/vf/adobe/times/ptmr8t.vf
 INPUT /opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/tfm/adobe/times/ptmr8r.tfm
-INPUT ../assets/plot_active_tokens.png
-INPUT ../assets/plot_active_tokens.png
-INPUT ../assets/plot_active_tokens.png
-INPUT ../assets/plot_active_tokens.png
 INPUT ../assets/plot_Avgat8.png
 INPUT ../assets/plot_Avgat8.png
 INPUT ../assets/plot_Avgat8.png

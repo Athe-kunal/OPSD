@@ -14,8 +14,7 @@
 \usepackage{graphicx}
 \graphicspath{ {../assets/} }
 
-\title{Does Where You Distill Matter? An Exploratory Study of\\
-Position-Selective Token Distillation for Reasoning Models}
+\title{Does Where You Distill Matter?}
 
 \author{
   Astarag Mohapatra \\
@@ -28,11 +27,11 @@ Position-Selective Token Distillation for Reasoning Models}
 \begin{abstract}
 Knowledge distillation for large reasoning models typically applies a uniform loss over every generated token.
 In this paper, we ask a simple question: does the \emph{position} of a token within a reasoning chain affect how useful it is as a distillation target?
-We build on On-Policy Self-Distillation (OPSD)~\cite{opsd2025}, which trains a student model by minimizing a forward KL divergence against a fixed teacher, and introduce six position-selective variants that restrict distillation to tokens drawn from the first, middle, or last sentence of each reasoning paragraph, with top-$k$ selection ($k\in\{1,2\}$).
+We build on On-Policy Self-Distillation (OPSD)~\cite{opsd2025}, which trains a student model by minimizing a forward KL divergence against a fixed teacher, and introduce four position-selective variants that restrict distillation to all tokens within the first, middle, or last sentence of each reasoning paragraph, or to the first token of each paragraph.
 To motivate this, we run a Mann-Whitney U test on per-token KL proxy values and find that sentence-start tokens exhibit significantly higher variance than middle or end tokens, suggesting they carry richer gradient signal.
-Our preliminary experiments on Qwen3-1.7B across AIME24, AIME25, and HMMT25 show mixed but occasionally promising results: \texttt{firstsent\_topk2} reaches 40.0\% Avg@8 on AIME25 at step 75, and \texttt{lastsent\_topk2} peaks at 60.8\% MajVote@8 on AIME24 at step 75, compared to the full-token OPSD baseline of 37.5\% and 52.5\% respectively at that step.
+Our preliminary experiments on Qwen3-1.7B across AIME24, AIME25, and HMMT25 show mixed but occasionally promising results: \texttt{firstsent\_topk1} reaches 41.5\% Avg@8 on AIME25 at step 50, compared to the full-token OPSD baseline of 35.8\% at that step.
 These gains are not stable across all checkpoints and benchmarks, and training curves are noisy — we do not claim a definitive improvement.
-Rather, we offer this as a useful datapoint: a sparser distillation signal concentrated at structurally motivated positions can sometimes match or briefly exceed full-token distillation, which motivates further investigation.
+Rather, we offer this as a useful datapoint: a sparser distillation signal concentrated at structurally motivated sentence positions can sometimes match or briefly exceed full-token distillation, which motivates further investigation.
 \end{abstract}
 
 \section{Introduction}
@@ -63,7 +62,7 @@ We then introduce six position-selective distillation variants on top of OPSD an
 Our contributions are:
 \begin{itemize}
     \item A positional entropy analysis showing that sentence-start tokens have significantly higher KL proxy variance than middle or end tokens (Section~\ref{sec:motivation}).
-    \item Six position-selective distillation variants that restrict training signal to specific sentence positions within paragraphs (Section~\ref{sec:method}).
+    \item Four position-selective distillation variants that restrict training signal to specific sentence positions within paragraphs (Section~\ref{sec:method}).
     \item Preliminary experimental results on three math benchmarks, with an honest discussion of what works, what does not, and why the results are inconclusive (Section~\ref{sec:results}).
 \end{itemize}
 
@@ -83,7 +82,7 @@ Training data comes from OpenThoughts~\cite{openthoughts2025}, a dataset of long
 \paragraph{Selective distillation.}
 Prior work on knowledge distillation has explored selecting which tokens or layers to distill.
 Methods like MiniLLM~\cite{gu2024minillm} and DistiLLM~\cite{ko2024distillm} focus on reverse KL or sequence-level objectives.
-Token-level selection has been explored in the context of top-$k$ vocabulary distillation~\cite{shi2024mini}, but positional selection within generated reasoning chains has received less attention.
+Positional selection within generated reasoning chains — restricting distillation to structurally motivated token positions — has received less attention.
 
 \section{Motivation: Positional Entropy Analysis}
 \label{sec:motivation}
@@ -141,20 +140,16 @@ For a paragraph with $S$ sentences, we label sentence $1$ as \emph{first}, sente
 A paragraph with a single sentence is treated as both first and last.
 
 \paragraph{Token selection.}
-Within each selected sentence, we apply top-$k$ selection: we pick the $k$ tokens with the highest absolute KL proxy value within that sentence as the distillation targets.
-All other tokens receive zero loss weight.
+For each selected sentence position, all tokens within that sentence contribute to the distillation loss.
+All tokens outside the selected position receive zero loss weight (implemented by setting their labels to $-100$).
 
-We test the following six variants, plus the full-token OPSD baseline:
+We test the following four variants, plus the full-token OPSD baseline:
 \begin{enumerate}
-    \item \textbf{firstsent\_topk1}: top-1 token from the first sentence of each paragraph
-    \item \textbf{middlesent\_topk1}: top-1 token from the middle sentence
-    \item \textbf{lastsent\_topk1}: top-1 token from the last sentence
-    \item \textbf{firstsent\_topk2}: top-2 tokens from the first sentence
-    \item \textbf{lastsent\_topk2}: top-2 tokens from the last sentence
-    \item \textbf{parafirsttok\_topk1}: the single first token of each paragraph (no sentence parsing)
+    \item \textbf{firstsent\_topk1}: all tokens in the first sentence of each paragraph
+    \item \textbf{middlesent\_topk1}: all tokens in the middle sentence of each paragraph
+    \item \textbf{lastsent\_topk1}: all tokens in the last sentence of each paragraph
+    \item \textbf{parafirsttok\_topk1}: only the single first token of each paragraph
 \end{enumerate}
-
-We also attempted \textbf{middlesent\_topk2} but found that training diverged, so we exclude it from the results.
 
 \section{Experiments}
 \label{sec:experiments}
@@ -169,18 +164,6 @@ We train for 100 steps and evaluate checkpoints at steps 25, 50, 75, and 100.
 We evaluate on three mathematical reasoning benchmarks: AIME 2024 (AIME24), AIME 2025 (AIME25), and HMMT 2025 (HMMT25).
 Inference uses vLLM with thinking mode enabled, temperature $1.0$, top-$p=0.95$, top-$k$ disabled, min-$p=0.0$, presence penalty $0.0$, and a maximum of $38{,}912$ new tokens.
 We draw $n=8$ samples per problem and report three metrics: \textbf{Pass@8} (fraction of problems solved by at least one sample), \textbf{MajVote@8} (majority-vote accuracy over 8 samples), and \textbf{Avg@8} (mean per-sample accuracy).
-
-\paragraph{Active loss tokens.}
-Figure~\ref{fig:active_tokens} shows the number of active loss tokens per step for each variant.
-The full-token OPSD baseline uses roughly 3{,}000--3{,}500 tokens per update, while all positional variants use far fewer — often under 200 for top-1 sentence variants and around 300 for top-2 variants.
-This confirms that position-selective distillation is genuinely sparse compared to the baseline.
-
-\begin{figure}[ht]
-    \centering
-    \includegraphics[width=\textwidth]{plot_active_tokens.png}
-    \caption{Active loss tokens per training step for each variant. The baseline (full-token OPSD) uses far more tokens per update than any positional variant, confirming the sparsity of the position-selective approach.}
-    \label{fig:active_tokens}
-\end{figure}
 
 \paragraph{Benchmark results.}
 Figures~\ref{fig:avg8}, \ref{fig:majvote8}, and \ref{fig:pass8} show all metrics across training steps for all variants.
@@ -213,8 +196,8 @@ The honest summary is that results are noisy and no single variant consistently 
 However, a few patterns are worth noting.
 
 \textbf{First and last sentence variants occasionally match the baseline.}
-\texttt{firstsent\_topk2} and \texttt{lastsent\_topk2} occasionally match or slightly exceed the baseline on AIME24 and AIME25 at certain checkpoints.
-This is notable because these variants use substantially fewer distillation tokens, so they are achieving similar performance with a sparser training signal.
+\texttt{firstsent\_topk1} and \texttt{lastsent\_topk1} occasionally match or slightly exceed the baseline on AIME24 and AIME25 at certain checkpoints.
+This is notable because these variants restrict distillation to a single sentence per paragraph, achieving similar performance with a substantially sparser training signal.
 
 \textbf{Middle sentence underperforms.}
 \texttt{middlesent\_topk1} is generally the weakest variant across all three benchmarks, which is consistent with the lower-entropy observation in Section~\ref{sec:motivation} — middle-sentence tokens have the lowest KL proxy variance and may carry the least informative signal.
@@ -229,7 +212,7 @@ A longer run with more checkpoints and multiple seeds would be needed to say any
 \textbf{Limitations.}
 This is a small exploratory study.
 We only train one model size (1.7B parameters), run for 100 steps without a hyperparameter search, and evaluate on a narrow set of math benchmarks.
-The token selection heuristic (top-$k$ by KL proxy within a sentence) is simple and may not be the best way to identify high-signal tokens.
+The sentence-level selection granularity is coarse — a natural next step is to select individual high-KL tokens within the chosen sentence rather than all tokens.
 We also did not explore combining positions (e.g., first and last sentence together).
 
 \section{Conclusion}
@@ -275,11 +258,6 @@ Yuxian Gu, Li~Dong, Furu Wei, and Minlie Huang.
 Jongwoo Ko, Sungnyun Kim, Tianyi Chen, and Se-Young Yun.
 \newblock DistiLLM: Towards streamlined distillation for large language models.
 \newblock In {\em ICML}, 2024.
-
-\bibitem{shi2024mini}
-Zhenyu Shi, Xuanyu Zhang, Zhen Qin, Shentao Yang, and others.
-\newblock Efficient knowledge distillation via token-level vocabulary reduction.
-\newblock {\em arXiv preprint}, 2024.
 
 \bibitem{wang2026beyond}
 Shuo Wang, Longyue Yu, Chenyang Gao, Ce~Zheng, Siyuan Liu, Renliang Lu, et~al.

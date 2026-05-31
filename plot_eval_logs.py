@@ -46,9 +46,11 @@ def parse_log(path: Path) -> dict:
     return results
 
 
+EXCLUDE_VARIANTS = {"firstsent_topk2", "lastsent_topk2"}
+
+
 def shorten_name(name: str) -> str:
     """Create a readable label from the experiment folder name."""
-    # Strip common prefix
     prefix = "qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005"
     label = name.replace(prefix, "").lstrip("_")
     return label if label else "baseline"
@@ -65,6 +67,8 @@ def collect_data(logs_dir: Path) -> dict:
         if not exp_dir.is_dir():
             continue
         algo = shorten_name(exp_dir.name)
+        if algo in EXCLUDE_VARIANTS:
+            continue
         for log_file in sorted(exp_dir.glob("step*-thinking.log")):
             step_match = re.search(r"step(\d+)", log_file.name)
             if not step_match:
@@ -91,24 +95,23 @@ MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 def plot_metric(data: dict, metric: str, out_path: Path):
     plt.rcParams.update({
         "font.family": "serif",
-        "font.size": 11,
-        "axes.titlesize": 13,
-        "axes.labelsize": 12,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 10,
-        "legend.fontsize": 8,
+        "font.size": 14,
+        "axes.titlesize": 16,
+        "axes.labelsize": 14,
+        "xtick.labelsize": 13,
+        "ytick.labelsize": 13,
         "figure.dpi": 150,
         "axes.spines.top": False,
         "axes.spines.right": False,
     })
 
     algos = list(data.keys())
-    palette = cm.colormaps["tab10"].resampled(len(algos))
-    colors = [palette(i) for i in range(len(algos))]
+    palette = cm.get_cmap("tab10")
+    colors = [palette(i / max(len(algos) - 1, 1)) for i in range(len(algos))]
 
     fig, axes = plt.subplots(
         1, len(BENCHMARKS),
-        figsize=(5.5 * len(BENCHMARKS), 4.5),
+        figsize=(7 * len(BENCHMARKS), 6),
         sharey=False,
     )
     if len(BENCHMARKS) == 1:
@@ -126,8 +129,8 @@ def plot_metric(data: dict, metric: str, out_path: Path):
                 steps, values,
                 linestyle=ls,
                 marker=mk,
-                markersize=6,
-                linewidth=1.8,
+                markersize=7,
+                linewidth=2.0,
                 color=color,
                 label=algo,
             )
@@ -140,21 +143,35 @@ def plot_metric(data: dict, metric: str, out_path: Path):
         ax.grid(True, linestyle=":", linewidth=0.7, alpha=0.6, color="gray")
         ax.set_axisbelow(True)
 
-    # Single shared legend below all subplots
-    handles, labels = axes[0].get_legend_handles_labels()
+    # Gather legend entries from all axes (some variants may be missing from axes[0])
+    handles, labels = [], []
+    seen = set()
+    for ax in axes:
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            if l not in seen:
+                handles.append(h)
+                labels.append(l)
+                seen.add(l)
+
+    n_cols = len(handles)  # one row spanning full width
     fig.legend(
         handles, labels,
         loc="lower center",
-        ncol=min(len(algos), 4),
-        bbox_to_anchor=(0.5, -0.18),
+        ncol=n_cols,
+        bbox_to_anchor=(0.5, 0.0),
         frameon=True,
-        framealpha=0.9,
-        edgecolor="gray",
-        fontsize=8,
+        framealpha=0.95,
+        edgecolor="lightgray",
+        fontsize=13,
+        handlelength=2.5,
+        handletextpad=0.6,
+        columnspacing=1.2,
+        borderpad=0.8,
+        markerscale=1.4,
     )
 
-    fig.suptitle(metric, fontsize=14, fontweight="bold", y=1.02)
-    plt.tight_layout()
+    fig.suptitle(metric, fontsize=17, fontweight="bold")
+    plt.tight_layout(rect=[0, 0.13, 1, 0.97])
     plt.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close()
     print(f"Saved: {out_path}")
