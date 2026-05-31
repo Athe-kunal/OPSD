@@ -1,7 +1,7 @@
 #!/bin/bash
 
 BASE_MODEL="Qwen/Qwen3-1.7B"
-EXP_DIR="data0/siyanz/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_firstsent_topk2"
+EXP_DIR="data0/siyanz/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_parafirsttok_topk1"
 EXP_NAME=$(basename "$EXP_DIR")
 LOG_DIR="logs/${EXP_NAME}"
 mkdir -p "$LOG_DIR"
@@ -43,13 +43,13 @@ run_checkpoint() {
 echo "=== Thinking mode ==="
 
 echo "--- Batch 1: checkpoint-25 (GPU 2) and checkpoint-50 (GPU 3) ---"
-run_checkpoint 25 2 "thinking" &
-run_checkpoint 50 3 "thinking" &
+run_checkpoint 25 0 "thinking" &
+run_checkpoint 50 1 "thinking" &
 wait
 
 echo "--- Batch 2: checkpoint-75 (GPU 2) and checkpoint-100 (GPU 3) ---"
-run_checkpoint 75 2 "thinking" &
-run_checkpoint 100 3 "thinking" &
+run_checkpoint 75 0 "thinking" &
+run_checkpoint 100 1 "thinking" &
 wait
 
 echo "=== All checkpoints evaluated. Logs in ${LOG_DIR} ==="

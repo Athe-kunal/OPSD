@@ -1,7 +1,7 @@
 #!/bin/bash
 
 BASE_MODEL="Qwen/Qwen3-1.7B"
-CHECKPOINT_DIR="data0/siyanz/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005/checkpoint-100"
+CHECKPOINT_DIR="data0/siyanz/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_lastsent_topk1/checkpoint-100"
 STEP=100
 GPU=1
 THINKING="thinking"

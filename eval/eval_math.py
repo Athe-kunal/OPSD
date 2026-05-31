@@ -102,7 +102,7 @@ def load_vllm_model(
         "trust_remote_code": True,
         "max_model_len": max_model_len,
         "distributed_executor_backend": "mp",
-        "enforce_eager": True,
+        "enforce_eager": False,
     }
 
     if lora_adapter_path is not None:
