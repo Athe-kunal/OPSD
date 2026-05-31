@@ -29,7 +29,7 @@ Knowledge distillation for large reasoning models typically applies a uniform lo
 In this paper, we ask a simple question: does the \emph{position} of a token within a reasoning chain affect how useful it is as a distillation target?
 We build on On-Policy Self-Distillation (OPSD)~\cite{opsd2025}, which trains a student model by minimizing a forward KL divergence against a fixed teacher, and introduce four position-selective variants that restrict distillation to all tokens within the first, middle, or last sentence of each reasoning paragraph, or to the first token of each paragraph.
 To motivate this, we run a Mann-Whitney U test on per-token KL proxy values and find that sentence-start tokens exhibit significantly higher variance than middle or end tokens, suggesting they carry richer gradient signal.
-Our preliminary experiments on Qwen3-1.7B across AIME24, AIME25, and HMMT25 show mixed but occasionally promising results: \texttt{firstsent\_topk1} reaches 41.5\% Avg@8 on AIME25 at step 50, compared to the full-token OPSD baseline of 35.8\% at that step.
+Our preliminary experiments on Qwen3-1.7B across AIME24, AIME25, and HMMT25 show mixed but occasionally promising results: \texttt{parafirsttok\_topk1} reaches 40.8\% Avg@8 on AIME25 at step 100, compared to the full-token OPSD baseline of 37.9\% at that step.
 These gains are not stable across all checkpoints and benchmarks, and training curves are noisy — we do not claim a definitive improvement.
 Rather, we offer this as a useful datapoint: a sparser distillation signal concentrated at structurally motivated sentence positions can sometimes match or briefly exceed full-token distillation, which motivates further investigation.
 \end{abstract}
