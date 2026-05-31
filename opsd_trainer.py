@@ -189,6 +189,7 @@ class OPSDTrainer(SFTTrainer):
         self.fixed_teacher = fixed_teacher
         self.reason_first = reason_first
         self.token_selection_mode = token_selection_mode
+        self.token_selection_top_k = token_selection_top_k
         # Position-axis (which sentence positions) and vocab-axis (top_k_loss) are orthogonal.
         # token_selection_mode controls position-axis via labels=-100; top_k_loss is unchanged.
         self.top_k_loss = top_k_loss
@@ -394,6 +395,7 @@ class OPSDTrainer(SFTTrainer):
         logits_are_probs=False,
         top_k=None,
         token_clip=None,
+        token_selection_top_k=None,
     ):
         """
         Compute the generalized Jensen-Shannon Divergence loss for knowledge distillation using F.kl_div. See Eq. (1)
@@ -467,6 +469,24 @@ class OPSDTrainer(SFTTrainer):
         # Per-token clipping: cap each token's divergence value
         if token_clip is not None:
             jsd = jsd.clamp(max=token_clip)
+
+        # Within each selected sentence region (labels != -100), keep only the top-k tokens
+        # by their per-token JSD value (summed over vocab). All other positions are zeroed out
+        # so they contribute nothing to the reduction.
+        if token_selection_top_k is not None and labels is not None:
+            selected = labels != -100  # (batch, seq)
+            # Per-token scalar JSD: sum over vocab dimension
+            per_token_jsd = jsd.sum(dim=-1)  # (batch, seq)
+            # Within each example, mask non-selected positions to -inf before topk
+            per_token_jsd_masked = per_token_jsd.masked_fill(~selected, float("-inf"))
+            k = min(token_selection_top_k, int(selected.sum(dim=-1).max().item()))
+            topk_indices = per_token_jsd_masked.topk(k, dim=-1).indices  # (batch, k)
+            topk_mask = torch.zeros_like(selected)
+            topk_mask.scatter_(1, topk_indices, True)
+            # Only keep positions that are both selected and in the top-k
+            final_mask = selected & topk_mask
+            labels = labels.clone()
+            labels[~final_mask] = -100
 
         # Masking
         if labels is not None:
@@ -817,6 +837,11 @@ class OPSDTrainer(SFTTrainer):
                 temperature=self.temperature,  # Let the function handle temperature
                 top_k=self.top_k_loss,
                 token_clip=self.jsd_token_clip,
+                token_selection_top_k=(
+                    self.token_selection_top_k
+                    if self.token_selection_mode not in ("baseline", "paragraph_first_token")
+                    else None
+                ),
             )
             del student_logits_for_loss, teacher_logits_for_loss
 
