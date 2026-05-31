@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026/Homebrew) (preloaded format=pdflatex 2026.3.4)  31 MAY 2026 01:30
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026/Homebrew) (preloaded format=pdflatex 2026.3.4)  31 MAY 2026 01:40
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -613,12 +613,12 @@ File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
 LaTeX Warning: `h' float specifier changed to `ht'.
 
 [2]
-<../assets/plot_Avgat8.png, id=80, 1501.7706pt x 432.53595pt>
+<../assets/plot_Avgat8.png, id=84, 1501.7706pt x 432.53595pt>
 File: ../assets/plot_Avgat8.png Graphic file (type png)
 <use ../assets/plot_Avgat8.png>
 Package pdftex.def Info: ../assets/plot_Avgat8.png  used on input line 173.
 (pdftex.def)             Requested size: 469.75499pt x 135.29254pt.
-<../assets/plot_MajVoteat8.png, id=82, 1501.7706pt x 432.53595pt>
+<../assets/plot_MajVoteat8.png, id=86, 1501.7706pt x 432.53595pt>
 File: ../assets/plot_MajVoteat8.png Graphic file (type png)
 <use ../assets/plot_MajVoteat8.png>
 Package pdftex.def Info: ../assets/plot_MajVoteat8.png  used on input line 180.
@@ -628,7 +628,7 @@ Package pdftex.def Info: ../assets/plot_MajVoteat8.png  used on input line 180.
 
 LaTeX Warning: `h' float specifier changed to `ht'.
 
-<../assets/plot_Passat8.png, id=83, 1501.7706pt x 432.53595pt>
+<../assets/plot_Passat8.png, id=87, 1501.7706pt x 432.53595pt>
 File: ../assets/plot_Passat8.png Graphic file (type png)
 <use ../assets/plot_Passat8.png>
 Package pdftex.def Info: ../assets/plot_Passat8.png  used on input line 187.
@@ -645,19 +645,15 @@ ux)
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
  ***********
-
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
 Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: 63DC668A706C40EE5BE25EE3BB5F0635;1070.
  ) 
 Here is how much of TeX's memory you used:
- 12810 strings out of 467525
- 203989 string characters out of 5408440
- 654452 words of memory out of 5000000
- 41319 multiletter control sequences out of 15000+600000
- 680457 words of font info for 192 fonts, out of 8000000 for 9000
+ 12816 strings out of 467525
+ 204084 string characters out of 5408440
+ 654614 words of memory out of 5000000
+ 41320 multiletter control sequences out of 15000+600000
+ 680587 words of font info for 194 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  75i,13n,79p,1001b,464s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/public/am
@@ -674,10 +670,10 @@ brew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/urw/times/utmb8a.pfb>
 </opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/urw/times/u
 tmr8a.pfb></opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1/u
 rw/times/utmri8a.pfb>
-Output written on main.pdf (5 pages, 906790 bytes).
+Output written on main.pdf (5 pages, 906671 bytes).
 PDF statistics:
- 183 PDF objects out of 1000 (max. 8388607)
- 146 compressed objects within 2 object streams
- 39 named destinations out of 1000 (max. 500000)
+ 186 PDF objects out of 1000 (max. 8388607)
+ 149 compressed objects within 2 object streams
+ 41 named destinations out of 1000 (max. 500000)
  51272 words of extra memory for PDF output out of 51595 (max. 10000000)
 

@@ -42,7 +42,7 @@ Rather, we offer this as a useful datapoint: a sparser distillation signal conce
 \end{quote}
 
 Training reasoning models is expensive.
-Methods like GRPO~\cite{shao2024deepseekmath} and self-distillation~\cite{opsd2025} have shown that a student model can be improved by learning from a stronger (or fixed) teacher's output distribution over long chain-of-thought completions.
+Methods like GRPO~\cite{shao2024deepseekmath} and self-distillation~\cite{opsd2025,hubotter2026rl,shenfeld2026continual} have shown that a student model can be improved by learning from a stronger (or fixed) teacher's output distribution over long chain-of-thought completions.
 However, most of these methods apply the distillation loss uniformly across every token in the generated sequence — including filler words, punctuation, and repetitive connectives that likely carry little information.
 
 Recent work has shown that this uniformity is not necessary.
@@ -234,6 +234,16 @@ Siyan Zhao, Zhuohan Xie, Mengdi Liu, Jiatao Gu, Guo Pang, Fei Chen, and Aditya G
 \newblock Self-Distilled Reasoner: On-Policy Self-Distillation for Large Language Models.
 \newblock {\em arXiv preprint arXiv:2601.18734}, 2026.
 
+\bibitem{shenfeld2026continual}
+Idan Shenfeld, Mehul Damani, Jonas H\"{u}botter, and Pulkit Agrawal.
+\newblock Self-distillation enables continual learning.
+\newblock {\em arXiv preprint arXiv:2601.19897}, 2026.
+
+\bibitem{hubotter2026rl}
+Jonas H\"{u}botter, Florian L\"{u}beck, Lenart Behric, Adrian Baumann, Marco Bagatella, Dunja Marta, et~al.
+\newblock Reinforcement Learning via Self-Distillation.
+\newblock {\em arXiv preprint arXiv:2601.20802}, 2026.
+
 \bibitem{shao2024deepseekmath}
 Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Mingchuan Zhang, Y.~K. Li, Y.~Wu, and Daya Guo.
 \newblock DeepSeekMath: Pushing the limits of mathematical reasoning in open language models.
@@ -267,7 +277,7 @@ Shuo Wang, Longyue Yu, Chenyang Gao, Ce~Zheng, Siyuan Liu, Renliang Lu, et~al.
 \bibitem{qwen3}
 Qwen Team.
 \newblock Qwen3 technical report.
-\newblock \url{https://huggingface.co/Qwen/Qwen3-1.7B}, 2025.
+\newblock {\em arXiv preprint arXiv:2505.09388}, 2025.
 
 \end{thebibliography}
 

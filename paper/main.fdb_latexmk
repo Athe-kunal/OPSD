@@ -1,9 +1,9 @@
 # Fdb version 4
-["pdflatex"] 1780215143.63029 "/Users/athekunal/DEV/OPSD token placement/OPSD/paper/main.tex" "main.pdf" "main" 1780215145.33759 0
+["pdflatex"] 1780216714.33037 "/Users/athekunal/DEV/OPSD token placement/OPSD/paper/main.tex" "main.pdf" "main" 1780216716.03757 0
   "../assets/plot_Avgat8.png" 1780215032.17072 373585 284602744a9460b3ef9306a8dab10024 ""
   "../assets/plot_MajVoteat8.png" 1780215032.63018 354404 79d2ba645b4260066a48acc8c4a3dc91 ""
   "../assets/plot_Passat8.png" 1780215031.7071 371144 be562e2cbdebd0464e02d247e6ac2cfa ""
-  "/Users/athekunal/DEV/OPSD token placement/OPSD/paper/main.tex" 1780215143.40676 16981 f88095ca47623396721a361c5ccfb8c9 ""
+  "/Users/athekunal/DEV/OPSD token placement/OPSD/paper/main.tex" 1780216714.06447 17233 7900517011b2827ff06676a3b433918d ""
   "/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/enc/dvips/base/8r.enc" 1772380719 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1772380719 2971 def0b6c1f0b107b3b936def894055589 ""
   "/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/map/fontname/texfonts.map" 1772380719 3524 cb3e574dea2d1052e39280babc910dc8 ""
@@ -106,9 +106,9 @@
   "/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/web2c/texmf.cnf" 1772380719 43633 14bbc273cebd985e64ab1a698333eaf9 ""
   "/opt/homebrew/Cellar/texlive/20260301/share/texmf-var/web2c/pdftex/pdflatex.fmt" 1772380719 3636956 5168b884cb430e6a6336cfea08fa659a ""
   "arxiv.sty" 1780210456.36839 7642 824ef14f3548279d54b419cf5e0f3098 ""
-  "main.aux" 1780215145.2654 4033 08c223291528b0746c164460a56d9645 "pdflatex"
-  "main.out" 1780215145.26677 1070 63dc668a706c40ee5be25ee3bb5f0635 "pdflatex"
-  "main.tex" 1780215143.40676 16981 f88095ca47623396721a361c5ccfb8c9 ""
+  "main.aux" 1780216715.97201 4108 a301f74a9198a3306d0ae1f0c35ee6c7 "pdflatex"
+  "main.out" 1780216715.97303 1070 63dc668a706c40ee5be25ee3bb5f0635 "pdflatex"
+  "main.tex" 1780216714.06447 17233 7900517011b2827ff06676a3b433918d ""
   (generated)
   "main.aux"
   "main.log"
