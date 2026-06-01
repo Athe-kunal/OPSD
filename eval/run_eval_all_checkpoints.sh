@@ -1,7 +1,7 @@
 #!/bin/bash
 
 BASE_MODEL="Qwen/Qwen3-1.7B"
-EXP_DIR="data0/siyanz/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_parafirsttok_topk1"
+EXP_DIR="data0/siyanz/opsd/qwen31b_gen1024_fixteacher_temp11_forwardbeta0_clip005_firstsent_topk2"
 EXP_NAME=$(basename "$EXP_DIR")
 LOG_DIR="logs/${EXP_NAME}"
 mkdir -p "$LOG_DIR"

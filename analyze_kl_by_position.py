@@ -90,12 +90,18 @@ def build_teacher_prompt(tokenizer, problem: str, solution: str) -> str:
 
 def classify_tokens(
     tokenizer, completion_text: str, n_tokens: int
-) -> list[str]:
+) -> tuple[list[str], list[bool], list[int]]:
     """
-    Returns a list of length n_tokens where each entry is one of:
-    'first', 'middle', 'last', 'single', 'unknown'.
+    Returns (labels, is_para_first_token, first_sent_tok_idx) all of length n_tokens.
+    labels: one of 'first', 'middle', 'last', 'single', 'unknown'.
+    is_para_first_token: True only for the very first token of each paragraph's
+                         first sentence (i.e. the opening token of a new paragraph).
+    first_sent_tok_idx: within-sentence token index for tokens in a paragraph's first
+                        sentence (0, 1, 2, ...), -1 for all other tokens.
     """
     labels = ["unknown"] * n_tokens
+    is_para_first_token = [False] * n_tokens
+    first_sent_tok_idx = [-1] * n_tokens
     paragraphs = completion_text.split("\n\n")
     token_pos = 0
 
@@ -122,11 +128,17 @@ def classify_tokens(
             end = min(sent_pos + sent_len, n_tokens)
             for k in range(sent_pos, end):
                 labels[k] = pos_label
+            # Mark the first token of the first sentence in this paragraph
+            if sent_idx == 0 and sent_pos < n_tokens:
+                is_para_first_token[sent_pos] = True
+                # Tag within-sentence indices for this first sentence
+                for k in range(sent_pos, end):
+                    first_sent_tok_idx[k] = k - sent_pos
             sent_pos += sent_len
 
         token_pos = min(token_pos + para_len, n_tokens)
 
-    return labels
+    return labels, is_para_first_token, first_sent_tok_idx
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +277,12 @@ def main():
     # Accumulate per-sentence-position log-prob deltas
     position_deltas: dict[str, list[float]] = defaultdict(list)
     # 'first', 'middle', 'last', 'single' → list of per-token deltas across all examples
+    para_first_token_deltas: list[float] = []  # delta for each paragraph's first token
+    # Within the first sentence of each paragraph: token-0 delta vs rest
+    first_sent_tok0_deltas: list[float] = []   # delta of token index 0 in each first sentence
+    first_sent_rest_deltas: list[float] = []   # deltas of all other tokens in first sentences
+    # Per-sentence: did token-0 have the max delta in that sentence?
+    first_sent_tok0_is_max: list[bool] = []
 
     raw_records = []  # for optional JSON dump
 
@@ -320,10 +338,12 @@ def main():
             t_lps = teacher_lps[:n_aligned]
 
             # --- Classify tokens by sentence position ---
-            pos_labels = classify_tokens(tokenizer, completion_text, n_aligned)
+            pos_labels, is_para_first, first_sent_idx = classify_tokens(tokenizer, completion_text, n_aligned)
 
             # --- Accumulate deltas ---
             record_tokens = []
+            # Collect per-sentence first-sentence deltas for tok0-is-max check
+            cur_first_sent_deltas: dict[int, list] = defaultdict(list)  # sent_start_pos -> [(within_idx, delta)]
             for i, (s_lp, t_lp) in enumerate(zip(s_lps, t_lps)):
                 if s_lp is None or t_lp is None:
                     continue
@@ -331,7 +351,26 @@ def main():
                 label = pos_labels[i]
                 if label != "unknown":
                     position_deltas[label].append(delta)
-                record_tokens.append({"pos": i, "label": label, "s_lp": s_lp, "t_lp": t_lp, "delta": delta})
+                if is_para_first[i]:
+                    para_first_token_deltas.append(delta)
+                widx = first_sent_idx[i]
+                if widx >= 0:
+                    # Use (i - widx) as a sentence-start key to group tokens per sentence
+                    cur_first_sent_deltas[i - widx].append((widx, delta))
+                    if widx == 0:
+                        first_sent_tok0_deltas.append(delta)
+                    else:
+                        first_sent_rest_deltas.append(delta)
+                record_tokens.append({"pos": i, "label": label, "para_first": is_para_first[i], "s_lp": s_lp, "t_lp": t_lp, "delta": delta})
+
+            # Per-sentence: check if tok0 had the max delta
+            for sent_entries in cur_first_sent_deltas.values():
+                if not sent_entries:
+                    continue
+                max_delta = max(d for _, d in sent_entries)
+                tok0_delta = next((d for w, d in sent_entries if w == 0), None)
+                if tok0_delta is not None:
+                    first_sent_tok0_is_max.append(tok0_delta >= max_delta)
 
             raw_records.append({
                 "problem": problem[:120],
@@ -373,10 +412,53 @@ def main():
             sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
             print(f"  {n1} > {n2}: p={p:.2e}  {sig}")
 
+    # --- Is token-0 of the first sentence the highest-entropy token in that sentence? ---
+    print("\nFirst-sentence token-0 vs rest (within first sentences only):")
+    if len(first_sent_tok0_deltas) >= 2 and len(first_sent_rest_deltas) >= 2:
+        summarize("Tok-0 ", first_sent_tok0_deltas)
+        summarize("Rest  ", first_sent_rest_deltas)
+        stat, p = stats.mannwhitneyu(first_sent_tok0_deltas, first_sent_rest_deltas, alternative="greater")
+        sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
+        print(f"  Mann-Whitney (tok-0 > rest): p={p:.2e}  {sig}")
+    if first_sent_tok0_is_max:
+        n_max = sum(first_sent_tok0_is_max)
+        n_tot = len(first_sent_tok0_is_max)
+        print(f"  Fraction of first sentences where tok-0 has max delta: {n_max}/{n_tot} = {n_max/n_tot:.3f}")
+    else:
+        print("  insufficient data")
+
+    # --- High-entropy analysis for paragraph-first tokens ---
+    print("\nParagraph-first-token high-entropy analysis:")
+    if len(para_first_token_deltas) >= 2:
+        all_deltas = []
+        for v in position_deltas.values():
+            all_deltas.extend(v)
+        if all_deltas:
+            q75 = np.percentile(all_deltas, 75)
+            q90 = np.percentile(all_deltas, 90)
+            pft = np.array(para_first_token_deltas)
+            n_total = len(pft)
+            n_hi75 = int((pft > q75).sum())
+            n_hi90 = int((pft > q90).sum())
+            print(f"  Paragraph-first tokens sampled : {n_total}")
+            print(f"  Global delta 75th percentile   : {q75:.5f}")
+            print(f"  Global delta 90th percentile   : {q90:.5f}")
+            print(f"  Fraction above p75 (high-entropy): {n_hi75}/{n_total} = {n_hi75/n_total:.3f}")
+            print(f"  Fraction above p90 (high-entropy): {n_hi90}/{n_total} = {n_hi90/n_total:.3f}")
+            summarize("ParaFirst", para_first_token_deltas)
+            # one-sided Mann-Whitney: para_first > all_other
+            other_deltas = [d for d in all_deltas if True]  # all positions (incl. para_first)
+            stat, p = stats.mannwhitneyu(para_first_token_deltas, all_deltas, alternative="greater")
+            sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
+            print(f"  Mann-Whitney (para_first > all): p={p:.2e}  {sig}")
+    else:
+        print("  insufficient data")
+
     # --- Summary counts ---
     print("\nToken counts per position:")
     for label in ("first", "middle", "last", "single"):
         print(f"  {label:6s}: {len(position_deltas.get(label, []))}")
+    print(f"  {'para_first':10s}: {len(para_first_token_deltas)}")
 
 
 if __name__ == "__main__":
