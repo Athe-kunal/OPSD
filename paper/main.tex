@@ -14,7 +14,7 @@
 \usepackage{graphicx}
 \graphicspath{ {../assets/} }
 
-\title{Does Where You Distill Matter?}
+\title{Positional Self-Distillation for Large Language Models}
 
 \author{
   Astarag Mohapatra \\
@@ -52,8 +52,8 @@ This motivates a natural design choice in distillation: focus the training signa
 
 The question we explore in this paper is a step further: \emph{where do these high-entropy tokens tend to appear in a reasoning chain?}
 In long-form mathematical reasoning, a model's output is structured into paragraphs — each paragraph represents a coherent sub-step or shift in reasoning strategy, and a new paragraph begins when the model transitions to a new line of thought.
-These paragraph boundaries are natural candidates for high-entropy positions: the model must decide not just what word comes next, but what direction to take the reasoning.
-Within a paragraph, we similarly expect the first sentence to carry more uncertainty than the middle or the end, which tend to elaborate on an already-committed direction.
+Within a paragraph, we expect the first sentence to carry more uncertainty than the middle or the end, which tend to elaborate on an already-committed direction.
+Paragraph boundaries themselves, however, turn out to be a more nuanced story: the very first token of a new paragraph (typically a newline or function word) is nearly deterministic, and our analysis reveals it is in fact the \emph{lowest}-entropy position (Section~\ref{sec:motivation}).
 
 We test this hypothesis empirically.
 Using a per-token KL proxy, we find that sentence-start tokens have significantly higher variance than middle or end tokens (Section~\ref{sec:motivation}).
@@ -101,10 +101,10 @@ Table~\ref{tab:kl_stats} reports the mean and standard deviation of this proxy, 
 \toprule
 Position & Mean & Std & 95\% CI & $n$ \\
 \midrule
-Start  & $-0.166$ & $1.617$ & $[-0.185,\,-0.147]$ & 28{,}344 \\
-Middle & $-0.074$ & $0.493$ & $[-0.084,\,-0.065]$ & 10{,}174 \\
-End    & $-0.102$ & $0.569$ & $[-0.110,\,-0.095]$ & 24{,}079 \\
-Single & $-0.116$ & $1.206$ & $[-0.119,\,-0.112]$ & 456{,}489 \\
+Start  & $-0.188$ & $1.713$ & $[-0.193,\,-0.183]$ & 535{,}999 \\
+Middle & $-0.083$ & $0.567$ & $[-0.085,\,-0.080]$ & 212{,}273 \\
+End    & $-0.100$ & $0.553$ & $[-0.101,\,-0.098]$ & 497{,}750 \\
+Single & $-0.118$ & $1.220$ & $[-0.119,\,-0.117]$ & 8{,}871{,}007 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -121,14 +121,22 @@ We run one-sided Mann-Whitney U tests to check whether start tokens have higher 
 Comparison & $p$-value & Interpretation \\
 \midrule
 Start $>$ Middle & $1.00$ & n.s. — start has higher variance, not higher mean \\
-Start $>$ End    & $2.31 \times 10^{-20}$ & significant \\
-Middle $>$ End   & $9.79 \times 10^{-36}$ & significant \\
+Start $>$ End    & $2.43 \times 10^{-59}$ & significant \\
+Middle $>$ End   & $0.00$ & highly significant \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-While the means are all negative (student slightly overconfident relative to teacher), the variance at the start position is much larger, meaning the signal is more extreme in both directions.
-We hypothesize that these high-variance tokens — often the first substantive word of a new sentence — represent decision points where the student's predictions diverge most from the teacher, making them more informative training targets.
+While the means are all negative (student slightly overconfident relative to teacher), the variance at the start position is much larger ($\text{std}=1.713$ vs.\ $0.567$ for middle and $0.553$ for end), meaning the signal is more extreme in both directions.
+We hypothesize that these high-variance tokens represent decision points where the student's predictions diverge most from the teacher, making them more informative training targets.
+
+\paragraph{A caveat on paragraph-first tokens.}
+We also separately analyzed the first token of each paragraph (token-0 of the first sentence), since paragraph boundaries are natural structural anchors.
+Counter-intuitively, these tokens are the \emph{lowest}-entropy position: mean KL proxy $= -0.967$ (std $= 5.002$, $n = 461{,}676$), versus $-0.078$ for the rest of first-sentence tokens.
+A Mann-Whitney test confirms that token-0 is stochastically \emph{lower} than the remaining tokens ($p = 1.00$ for the ``tok-0 $>$ rest'' alternative).
+This makes sense in retrospect: the first token of a new paragraph is typically a formatting or function word (``\textbackslash n'', ``The'', ``So'') whose identity is nearly deterministic given context, so the student is extremely confident and contributes almost no loss.
+The entropy is concentrated in the body of the first sentence, not its opening token.
+This foreshadows the underwhelming performance of \texttt{parafirsttok\_topk1} in our experiments (Section~\ref{sec:results}).
 
 \section{Method: Position-Selective Token Distillation}
 \label{sec:method}
@@ -202,8 +210,10 @@ This is notable because these variants restrict distillation to a single sentenc
 \textbf{Middle sentence underperforms.}
 \texttt{middlesent\_topk1} is generally the weakest variant across all three benchmarks, which is consistent with the lower-entropy observation in Section~\ref{sec:motivation} — middle-sentence tokens have the lowest KL proxy variance and may carry the least informative signal.
 
-\textbf{Paragraph-first token is inconsistent.}
-\texttt{parafirsttok\_topk1} shows variable behavior across benchmarks and does not clearly align with either the high-entropy or low-entropy story, possibly because the first token of a paragraph is often a formatting token rather than a semantically meaningful decision point.
+\textbf{Paragraph-first token is a low-entropy anchor.}
+\texttt{parafirsttok\_topk1} shows variable behavior across benchmarks.
+The entropy analysis in Section~\ref{sec:motivation} explains why: the first token of a paragraph (typically a newline, ``The'', or ``So'') has a mean KL proxy of $-0.967$, far more negative than any other group, meaning the student is already highly confident there.
+Restricting distillation to these near-zero-loss tokens provides very little gradient signal, which likely explains the inconsistent and generally unimpressive results for this variant.
 
 \textbf{Training curves are unstable.}
 All variants show significant fluctuation across the four checkpoints, which makes it difficult to draw firm conclusions from only 100 training steps.
