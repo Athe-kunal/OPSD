@@ -29,8 +29,6 @@ Usage:
 
 import argparse
 import json
-import math
-import sys
 from collections import defaultdict
 
 import nltk
@@ -88,28 +86,86 @@ def build_teacher_prompt(tokenizer, problem: str, solution: str) -> str:
 # Sentence-position classifier — same cursor logic as _compute_token_selection_mask
 # ---------------------------------------------------------------------------
 
+# Each paragraph is divided into equal thirds for approach 5.
+
+
 def classify_tokens(
     tokenizer, completion_text: str, n_tokens: int
-) -> tuple[list[str], list[bool], list[int]]:
+) -> tuple[list[str], list[bool], list[int], list[str], list[str], list[int]]:
     """
-    Returns (labels, is_para_first_token, first_sent_tok_idx) all of length n_tokens.
-    labels: one of 'first', 'middle', 'last', 'single', 'unknown'.
-    is_para_first_token: True only for the very first token of each paragraph's
-                         first sentence (i.e. the opening token of a new paragraph).
-    first_sent_tok_idx: within-sentence token index for tokens in a paragraph's first
-                        sentence (0, 1, 2, ...), -1 for all other tokens.
+    Returns (labels, is_para_first_token, first_sent_tok_idx, approach1_labels, approach5_labels, para_ids).
+
+    labels              : sentence-position label per token ('first','middle','last','single','unknown')
+    is_para_first_token : True for the opening token of each paragraph
+    first_sent_tok_idx  : within-sentence index for tokens in a paragraph's first sentence, else -1
+    approach1_labels    : 'boundary_first' | 'boundary_last' | 'other'
+                          (the very first and very last token of each paragraph)
+    approach5_labels    : 'ratio_first' | 'ratio_last' | 'ratio_middle'
+                          (equal thirds of each paragraph by token count)
+    para_ids            : paragraph index (0-based) for each token position
     """
     labels = ["unknown"] * n_tokens
     is_para_first_token = [False] * n_tokens
     first_sent_tok_idx = [-1] * n_tokens
-    paragraphs = completion_text.split("\n\n")
+    approach1_labels = ["other"] * n_tokens
+    approach5_labels = ["ratio_middle"] * n_tokens
+    para_ids = [-1] * n_tokens
+
+    MIN_THIRD_TOKENS = 3  # paragraphs with fewer tokens than this are merged
+
+    raw_paragraphs = completion_text.split("\n\n")
+
+    # Merge short paragraphs: forward into next, or backward if last.
+    paragraphs: list[str] = []
+    for i, para in enumerate(raw_paragraphs):
+        tok_len = len(tokenizer.encode(para, add_special_tokens=False))
+        if tok_len < MIN_THIRD_TOKENS and paragraphs:
+            # too short — append to the previous paragraph (merge forward-looking content back)
+            # but if this is the last raw paragraph just append to previous
+            paragraphs[-1] = paragraphs[-1] + "\n\n" + para
+        elif tok_len < MIN_THIRD_TOKENS and not paragraphs:
+            # first paragraph is short — keep it; will be merged when next paragraph is processed
+            paragraphs.append(para)
+        else:
+            if paragraphs and len(tokenizer.encode(paragraphs[-1], add_special_tokens=False)) < MIN_THIRD_TOKENS:
+                # previous paragraph was short and had no predecessor to merge into — merge it forward into this one
+                paragraphs[-1] = paragraphs[-1] + "\n\n" + para
+            else:
+                paragraphs.append(para)
+
     token_pos = 0
 
     for para_idx, para in enumerate(paragraphs):
-        # Include the separator in the paragraph token count (except the last paragraph)
         para_with_sep = para if para_idx == len(paragraphs) - 1 else para + "\n\n"
         para_len = len(tokenizer.encode(para_with_sep, add_special_tokens=False))
 
+        para_start = token_pos
+        para_end = min(token_pos + para_len, n_tokens)
+        actual_len = para_end - para_start
+
+        if actual_len > 0:
+            # --- Paragraph ID ---
+            for k in range(para_start, para_end):
+                para_ids[k] = para_idx
+
+            # --- Approach 1: boundary tokens only ---
+            approach1_labels[para_start] = "boundary_first"
+            approach1_labels[para_end - 1] = "boundary_last"
+
+            # --- Approach 5: equal thirds ---
+            # Short paragraphs are pre-merged above, so third >= 1 is guaranteed.
+            third = max(1, actual_len // 3)
+            t1 = para_start + third          # end of first third (exclusive)
+            t2 = para_start + 2 * third      # end of second third (exclusive)
+            # last third absorbs any remainder from integer division
+            for k in range(para_start, t1):
+                approach5_labels[k] = "ratio_first"
+            for k in range(t1, t2):
+                approach5_labels[k] = "ratio_middle"
+            for k in range(t2, para_end):
+                approach5_labels[k] = "ratio_last"
+
+        # --- Existing sentence-position labels ---
         sentences = nltk.sent_tokenize(para) if para.strip() else []
         n_sents = len(sentences)
         sent_pos = token_pos
@@ -128,17 +184,15 @@ def classify_tokens(
             end = min(sent_pos + sent_len, n_tokens)
             for k in range(sent_pos, end):
                 labels[k] = pos_label
-            # Mark the first token of the first sentence in this paragraph
             if sent_idx == 0 and sent_pos < n_tokens:
                 is_para_first_token[sent_pos] = True
-                # Tag within-sentence indices for this first sentence
                 for k in range(sent_pos, end):
                     first_sent_tok_idx[k] = k - sent_pos
             sent_pos += sent_len
 
-        token_pos = min(token_pos + para_len, n_tokens)
+        token_pos = para_end
 
-    return labels, is_para_first_token, first_sent_tok_idx
+    return labels, is_para_first_token, first_sent_tok_idx, approach1_labels, approach5_labels, para_ids
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +292,7 @@ def parse_args():
     p.add_argument("--base_url", default="http://localhost:8007/v1", help="vLLM OpenAI-compatible server URL")
     p.add_argument("--model", default="Qwen/Qwen3-1.7B", help="Model name as registered in vLLM")
     p.add_argument("--api_key", default="EMPTY", help="API key (vLLM default: EMPTY)")
-    p.add_argument("--num_samples", type=int, default=10_000, help="Number of dataset examples to process")
+    p.add_argument("--num_samples", type=int, default=1000, help="Number of dataset examples to process")
     p.add_argument("--dataset_split", default="train", help="Dataset split to sample from")
     p.add_argument("--max_new_tokens", type=int, default=2048, help="Max student completion tokens")
     p.add_argument("--temperature", type=float, default=1.1, help="Sampling temperature (matches run_opsd_1b.sh)")
@@ -283,6 +337,12 @@ def main():
     first_sent_rest_deltas: list[float] = []   # deltas of all other tokens in first sentences
     # Per-sentence: did token-0 have the max delta in that sentence?
     first_sent_tok0_is_max: list[bool] = []
+
+    # Approach 1: boundary token deltas (every boundary token)
+    approach1_deltas: dict[str, list[float]] = defaultdict(list)  # 'boundary_first', 'boundary_last', 'other'
+    # Approach 5: per-paragraph MAX delta (highest-entropy token) per segment
+    # Each entry = max delta of one paragraph's segment, enabling a fair per-paragraph Mann-Whitney test
+    approach5_max_deltas: dict[str, list[float]] = defaultdict(list)  # 'ratio_first', 'ratio_last', 'ratio_middle'
 
     raw_records = []  # for optional JSON dump
 
@@ -338,16 +398,22 @@ def main():
             t_lps = teacher_lps[:n_aligned]
 
             # --- Classify tokens by sentence position ---
-            pos_labels, is_para_first, first_sent_idx = classify_tokens(tokenizer, completion_text, n_aligned)
+            pos_labels, is_para_first, first_sent_idx, a1_labels, a5_labels, para_ids = classify_tokens(
+                tokenizer, completion_text, n_aligned
+            )
 
             # --- Accumulate deltas ---
             record_tokens = []
-            # Collect per-sentence first-sentence deltas for tok0-is-max check
-            cur_first_sent_deltas: dict[int, list] = defaultdict(list)  # sent_start_pos -> [(within_idx, delta)]
+            cur_first_sent_deltas: dict[int, list] = defaultdict(list)
+            # per-paragraph, per-segment bucket for approach 5 max computation
+            para_seg_deltas: dict[tuple[int, str], list[float]] = defaultdict(list)
+
             for i, (s_lp, t_lp) in enumerate(zip(s_lps, t_lps)):
                 if s_lp is None or t_lp is None:
                     continue
                 delta = t_lp - s_lp
+
+                # Existing sentence-position
                 label = pos_labels[i]
                 if label != "unknown":
                     position_deltas[label].append(delta)
@@ -355,13 +421,30 @@ def main():
                     para_first_token_deltas.append(delta)
                 widx = first_sent_idx[i]
                 if widx >= 0:
-                    # Use (i - widx) as a sentence-start key to group tokens per sentence
                     cur_first_sent_deltas[i - widx].append((widx, delta))
                     if widx == 0:
                         first_sent_tok0_deltas.append(delta)
                     else:
                         first_sent_rest_deltas.append(delta)
-                record_tokens.append({"pos": i, "label": label, "para_first": is_para_first[i], "s_lp": s_lp, "t_lp": t_lp, "delta": delta})
+
+                # Approach 1: boundary tokens (every boundary token contributes)
+                approach1_deltas[a1_labels[i]].append(delta)
+
+                # Approach 5: collect per-paragraph per-segment deltas for max extraction
+                if para_ids[i] >= 0:
+                    para_seg_deltas[(para_ids[i], a5_labels[i])].append(delta)
+
+                record_tokens.append({
+                    "pos": i, "label": label,
+                    "para_first": is_para_first[i],
+                    "a1": a1_labels[i], "a5": a5_labels[i],
+                    "s_lp": s_lp, "t_lp": t_lp, "delta": delta,
+                })
+
+            # Flush approach 5: take the max-delta (highest-entropy) token per paragraph per segment
+            for (_, seg), deltas in para_seg_deltas.items():
+                if deltas:
+                    approach5_max_deltas[seg].append(max(deltas))
 
             # Per-sentence: check if tok0 had the max delta
             for sent_entries in cur_first_sent_deltas.values():
@@ -408,7 +491,7 @@ def main():
             if len(v1) < 2 or len(v2) < 2:
                 print(f"  {n1} > {n2}: insufficient data")
                 continue
-            stat, p = stats.mannwhitneyu(v1, v2, alternative="greater")
+            _, p = stats.mannwhitneyu(v1, v2, alternative="greater")
             sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
             print(f"  {n1} > {n2}: p={p:.2e}  {sig}")
 
@@ -417,7 +500,7 @@ def main():
     if len(first_sent_tok0_deltas) >= 2 and len(first_sent_rest_deltas) >= 2:
         summarize("Tok-0 ", first_sent_tok0_deltas)
         summarize("Rest  ", first_sent_rest_deltas)
-        stat, p = stats.mannwhitneyu(first_sent_tok0_deltas, first_sent_rest_deltas, alternative="greater")
+        _, p = stats.mannwhitneyu(first_sent_tok0_deltas, first_sent_rest_deltas, alternative="greater")
         sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
         print(f"  Mann-Whitney (tok-0 > rest): p={p:.2e}  {sig}")
     if first_sent_tok0_is_max:
@@ -447,18 +530,79 @@ def main():
             print(f"  Fraction above p90 (high-entropy): {n_hi90}/{n_total} = {n_hi90/n_total:.3f}")
             summarize("ParaFirst", para_first_token_deltas)
             # one-sided Mann-Whitney: para_first > all_other
-            other_deltas = [d for d in all_deltas if True]  # all positions (incl. para_first)
-            stat, p = stats.mannwhitneyu(para_first_token_deltas, all_deltas, alternative="greater")
+            _, p = stats.mannwhitneyu(para_first_token_deltas, all_deltas, alternative="greater")
             sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
             print(f"  Mann-Whitney (para_first > all): p={p:.2e}  {sig}")
     else:
         print("  insufficient data")
+
+    # --- Approach 1: boundary token analysis ---
+    bf = approach1_deltas.get("boundary_first", [])
+    bl = approach1_deltas.get("boundary_last",  [])
+    ot = approach1_deltas.get("other",          [])
+
+    print(f"\n{'='*60}")
+    print(f"APPROACH 1: Paragraph boundary tokens only")
+    print(f"  (very first token and very last token of each \\n\\n paragraph)")
+    print(f"{'='*60}")
+    summarize("BoundaryFirst", bf)
+    summarize("BoundaryLast ", bl)
+    summarize("Other        ", ot)
+
+    print("\nMann-Whitney U tests (one-sided: row > Other):")
+    for name, vals in [("BoundaryFirst", bf), ("BoundaryLast", bl)]:
+        if len(vals) < 2 or len(ot) < 2:
+            print(f"  {name} > Other: insufficient data")
+            continue
+        _, p = stats.mannwhitneyu(vals, ot, alternative="greater")
+        sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
+        print(f"  {name} > Other: p={p:.2e}  {sig}")
+
+    print("\nMann-Whitney (BoundaryFirst > BoundaryLast):")
+    if len(bf) >= 2 and len(bl) >= 2:
+        _, p = stats.mannwhitneyu(bf, bl, alternative="greater")
+        sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
+        print(f"  p={p:.2e}  {sig}")
+
+    # --- Approach 5: ratio-based analysis (max-delta token per paragraph per segment) ---
+    rf  = approach5_max_deltas.get("ratio_first",  [])
+    rl  = approach5_max_deltas.get("ratio_last",   [])
+    rm  = approach5_max_deltas.get("ratio_middle", [])
+
+    print(f"\n{'='*60}")
+    print(f"APPROACH 5: Equal-thirds split — highest-entropy token per paragraph segment")
+    print(f"  (first third / middle third / last third; one max-delta value per paragraph)")
+    print(f"{'='*60}")
+    summarize("RatioFirst ", rf)
+    summarize("RatioLast  ", rl)
+    summarize("RatioMiddle", rm)
+
+    print("\nMann-Whitney U tests (one-sided: row > RatioMiddle):")
+    for name, vals in [("RatioFirst", rf), ("RatioLast", rl)]:
+        if len(vals) < 2 or len(rm) < 2:
+            print(f"  {name} > RatioMiddle: insufficient data")
+            continue
+        _, p = stats.mannwhitneyu(vals, rm, alternative="greater")
+        sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
+        print(f"  {name} > RatioMiddle: p={p:.2e}  {sig}")
+
+    print("\nMann-Whitney (RatioFirst > RatioLast):")
+    if len(rf) >= 2 and len(rl) >= 2:
+        _, p = stats.mannwhitneyu(rf, rl, alternative="greater")
+        sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "n.s."
+        print(f"  p={p:.2e}  {sig}")
 
     # --- Summary counts ---
     print("\nToken counts per position:")
     for label in ("first", "middle", "last", "single"):
         print(f"  {label:6s}: {len(position_deltas.get(label, []))}")
     print(f"  {'para_first':10s}: {len(para_first_token_deltas)}")
+    print(f"\nApproach 1 token counts:")
+    for label in ("boundary_first", "boundary_last", "other"):
+        print(f"  {label:15s}: {len(approach1_deltas.get(label, []))}")
+    print(f"\nApproach 5 paragraph counts (equal thirds, one max-delta per paragraph):")
+    for label in ("ratio_first", "ratio_last", "ratio_middle"):
+        print(f"  {label:15s}: {len(approach5_max_deltas.get(label, []))}")
 
 
 if __name__ == "__main__":

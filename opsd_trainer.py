@@ -146,6 +146,9 @@ class OPSDTrainer(SFTTrainer):
         teacher_thinking: bool = True,
         token_selection_mode: str = "baseline",
         token_selection_top_k: int = 1,
+        beta_first: float | None = None,
+        beta_middle: float | None = None,
+        beta_last: float | None = None,
     ):
         self.model_name_or_path = model if isinstance(model, str) else model.config._name_or_path
         self.model_revision = getattr(args, "student_model_revision", None)
@@ -182,6 +185,9 @@ class OPSDTrainer(SFTTrainer):
 
         self.lmbda = args.lmbda
         self.beta = args.beta
+        self.beta_first = beta_first if beta_first is not None else args.beta
+        self.beta_middle = beta_middle if beta_middle is not None else args.beta
+        self.beta_last = beta_last if beta_last is not None else args.beta
         self.temperature = args.temperature
         self.top_p = args.top_p
         self.seq_kd = args.seq_kd
@@ -445,7 +451,15 @@ class OPSDTrainer(SFTTrainer):
             student_log_probs = F.log_softmax(student_logits, dim=-1)
             teacher_log_probs = F.log_softmax(teacher_logits, dim=-1)
 
-        if beta == 0:
+        if isinstance(beta, torch.Tensor):
+            # Per-token beta: shape (batch, seq_len).
+            # Compute forward and reverse KL for all positions, then blend per token.
+            # beta=0 → forward KL(teacher||student), beta=1 → reverse KL(student||teacher).
+            fwd_kl = F.kl_div(student_log_probs, teacher_log_probs, reduction="none", log_target=True)
+            rev_kl = F.kl_div(teacher_log_probs, student_log_probs, reduction="none", log_target=True)
+            beta_v = beta.to(fwd_kl.dtype).unsqueeze(-1)  # (batch, seq_len, 1) for vocab broadcast
+            jsd = (1.0 - beta_v) * fwd_kl + beta_v * rev_kl
+        elif beta == 0:
             jsd = F.kl_div(student_log_probs, teacher_log_probs, reduction="none", log_target=True)
         elif beta == 1:
             jsd = F.kl_div(teacher_log_probs, student_log_probs, reduction="none", log_target=True)
@@ -654,38 +668,42 @@ class OPSDTrainer(SFTTrainer):
         For non-baseline token_selection_mode, selected positions will contribute to the JSD
         loss; all other positions will be masked out via labels=-100.
 
-        Paragraph boundaries are defined by '\\n\\n'.  Sentence boundaries within a paragraph
-        are detected with nltk.sent_tokenize.  Token counts per paragraph/sentence are
-        estimated by re-tokenising each piece independently — this is an approximation but is
-        fast and correct enough in practice.
+        Equal-thirds modes ('first_third', 'middle_third', 'last_third', 'last_two_thirds')
+        are handled by positional_split.compute_thirds_mask, which pre-merges short paragraphs
+        (bare LaTeX delimiters etc.) before dividing each paragraph into equal thirds.
+
+        Sentence-based modes ('first_sentence', 'last_sentence', 'paragraph_first_token')
+        use nltk.sent_tokenize on raw \\n\\n-separated paragraphs.
 
         Returns:
             List of bool tensors, one per example, shape (completion_length,).
         """
-        import nltk
+        from positional_split import THIRDS_MODES, compute_thirds_mask
 
         tokenize = self.processing_class
         mode = self.token_selection_mode
         masks = []
 
         for comp_ids, comp_text in zip(completion_ids_list, completion_texts):
+            # --- Equal-thirds modes (paragraph-merge + thirds split) ---
+            if mode in THIRDS_MODES:
+                mask = compute_thirds_mask(comp_ids, comp_text, tokenize, mode)
+                masks.append(mask)
+                continue
+
+            # --- Sentence-based / paragraph-first-token modes ---
+            import nltk
+
             n_tokens = len(comp_ids)
             mask = torch.zeros(n_tokens, dtype=torch.bool)
-
-            # Split completion into paragraphs; keep the separator so token counts stay aligned.
-            # We reconstruct token positions by re-encoding each paragraph piece.
             raw_paragraphs = comp_text.split("\n\n")
             token_pos = 0
 
             for para_idx, para in enumerate(raw_paragraphs):
-                # Re-add the '\n\n' separator for all but the last paragraph so that the
-                # cumulative token count stays aligned with the actual completion encoding.
                 para_with_sep = para if para_idx == len(raw_paragraphs) - 1 else para + "\n\n"
-                para_ids = tokenize.encode(para_with_sep, add_special_tokens=False)
-                para_len = len(para_ids)
+                para_len = len(tokenize.encode(para_with_sep, add_special_tokens=False))
 
                 if mode == "paragraph_first_token":
-                    # Select only the very first token of this paragraph block.
                     if token_pos < n_tokens:
                         mask[token_pos] = True
                 else:
@@ -694,17 +712,13 @@ class OPSDTrainer(SFTTrainer):
                     sent_token_pos = token_pos
 
                     for sent_idx, sent in enumerate(sentences):
-                        sent_ids = tokenize.encode(sent, add_special_tokens=False)
-                        sent_len = len(sent_ids)
-
+                        sent_len = len(tokenize.encode(sent, add_special_tokens=False))
                         is_first = sent_idx == 0
                         is_last = sent_idx == n_sents - 1
-                        is_middle = not is_first and not is_last
 
                         selected = (
                             (mode == "first_sentence" and is_first)
                             or (mode == "last_sentence" and is_last)
-                            or (mode == "middle_sentences" and is_middle)
                         )
 
                         if selected:
@@ -718,6 +732,38 @@ class OPSDTrainer(SFTTrainer):
             masks.append(mask)
 
         return masks
+
+    def _build_beta_tensor(self, inputs, shifted_labels: torch.Tensor) -> torch.Tensor:
+        """Build a per-token beta tensor of shape (batch, seq_len) using equal-thirds split.
+
+        Tokens in the first third  → self.beta_first
+        Tokens in the middle third → self.beta_middle
+        Tokens in the last third   → self.beta_last
+        """
+        from positional_split import compute_thirds_mask
+
+        batch_size, seq_len = shifted_labels.shape
+        device = shifted_labels.device
+        beta_tensor = torch.full((batch_size, seq_len), fill_value=self.beta_first, dtype=torch.float32, device=device)
+
+        completion_ids_list = [
+            inputs["student_input_ids"][i, inputs["student_prompt_lengths_per_example"][i].item():].tolist()
+            for i in range(batch_size)
+        ]
+        completion_texts = self.processing_class.batch_decode(
+            [inputs["student_input_ids"][i, inputs["student_prompt_lengths_per_example"][i].item():]
+             for i in range(batch_size)],
+            skip_special_tokens=False,
+        )
+
+        for i, (comp_ids, comp_text) in enumerate(zip(completion_ids_list, completion_texts)):
+            n = min(len(comp_ids), seq_len)
+            middle_mask = compute_thirds_mask(comp_ids, comp_text, self.processing_class, "middle_third")[:n]
+            last_mask   = compute_thirds_mask(comp_ids, comp_text, self.processing_class, "last_third")[:n]
+            beta_tensor[i, :n][middle_mask.to(device)] = self.beta_middle
+            beta_tensor[i, :n][last_mask.to(device)]   = self.beta_last
+
+        return beta_tensor
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -828,13 +874,17 @@ class OPSDTrainer(SFTTrainer):
                 student_log_probs_sampled_masked,
             )
         else:
+            # Use per-token beta when the three thirds have different beta values.
+            per_token_betas = self.beta_first != self.beta_middle or self.beta_middle != self.beta_last
+            beta = self._build_beta_tensor(inputs, shifted_labels) if per_token_betas else self.beta
+
             # Temperature is applied inside generalized_jsd_loss
             loss = self.generalized_jsd_loss(
                 student_logits=student_logits_for_loss,
                 teacher_logits=teacher_logits_for_loss,
                 labels=shifted_labels,
-                beta=self.beta,
-                temperature=self.temperature,  # Let the function handle temperature
+                beta=beta,
+                temperature=self.temperature,
                 top_k=self.top_k_loss,
                 token_clip=self.jsd_token_clip,
                 token_selection_top_k=(

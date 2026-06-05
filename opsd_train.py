@@ -166,10 +166,14 @@ class CustomScriptArguments(ScriptArguments):
             "help": "Controls which token positions contribute to the JSD loss. "
             "Options: "
             "'baseline' — all positions (default OPSD behavior); "
+            "'last_third' — last third of each paragraph (highest, most consistent teacher signal); "
+            "'last_two_thirds' — middle + last third of each paragraph; "
+            "'middle_third' — middle third of each paragraph; "
+            "'first_third' — first third of each paragraph (noisy, not recommended); "
             "'first_sentence' — only tokens in the first sentence of each \\n\\n-paragraph; "
-            "'middle_sentences' — only tokens in middle sentences of each paragraph; "
             "'last_sentence' — only tokens in the last sentence of each paragraph; "
-            "'paragraph_first_token' — only the very first token of each \\n\\n-separated block."
+            "'paragraph_first_token' — only the very first token of each \\n\\n-separated block. "
+            "Thirds modes pre-merge short paragraphs (bare LaTeX delimiters) before splitting."
         },
     )
     token_selection_top_k: int = field(
@@ -177,6 +181,28 @@ class CustomScriptArguments(ScriptArguments):
         metadata={
             "help": "Vocab-axis top-k used at the selected token positions for non-baseline modes. "
             "Typical values: 1 or 2. Ignored when token_selection_mode='baseline'."
+        },
+    )
+    beta_first: float = field(
+        default=None,
+        metadata={
+            "help": "Beta (KL direction) for the first third of each paragraph. "
+            "0=forward KL, 1=reverse KL. Defaults to --beta if not set. "
+            "When beta_first/middle/last differ, a per-token beta tensor is built."
+        },
+    )
+    beta_middle: float = field(
+        default=None,
+        metadata={
+            "help": "Beta (KL direction) for the middle third of each paragraph. "
+            "0=forward KL, 1=reverse KL. Defaults to --beta if not set."
+        },
+    )
+    beta_last: float = field(
+        default=None,
+        metadata={
+            "help": "Beta (KL direction) for the last third of each paragraph. "
+            "0=forward KL, 1=reverse KL. Defaults to --beta if not set."
         },
     )
 
@@ -358,6 +384,9 @@ if __name__ == "__main__":
         teacher_thinking=script_args.teacher_thinking,
         token_selection_mode=script_args.token_selection_mode,
         token_selection_top_k=script_args.token_selection_top_k,
+        beta_first=script_args.beta_first,
+        beta_middle=script_args.beta_middle,
+        beta_last=script_args.beta_last,
     )
 
     # trainer.add_callback(AsyncEvalCallback(
